@@ -22,13 +22,24 @@ namespace Nop.Web.Framework.Migrations.UpgradeTo460
             //do not use DI, because it produces exception on the installation process
             var localizationService = EngineContext.Current.Resolve<ILocalizationService>();
 
+            //use localizationService to add, update and delete localization resources
+            localizationService.DeleteLocaleResourcesAsync(new List<string>
+            {
+                //#6102
+                "Admin.Configuration.AppSettings.Plugin.ClearPluginShadowDirectoryOnStartup",
+                "Admin.Configuration.AppSettings.Plugin.ClearPluginShadowDirectoryOnStartup.Hint",
+                "Admin.Configuration.AppSettings.Plugin.CopyLockedPluginAssembilesToSubdirectoriesOnStartup",
+                "Admin.Configuration.AppSettings.Plugin.CopyLockedPluginAssembilesToSubdirectoriesOnStartup.Hint",
+                "Admin.Configuration.AppSettings.Plugin.UsePluginsShadowCopy",
+                "Admin.Configuration.AppSettings.Plugin.UsePluginsShadowCopy.Hint"
+            }).Wait();
+
             var languageService = EngineContext.Current.Resolve<ILanguageService>();
             var languages = languageService.GetAllLanguagesAsync(true).Result;
             var languageId = languages
                 .Where(lang => lang.UniqueSeoCode == new CultureInfo(NopCommonDefaults.DefaultLanguageCulture).TwoLetterISOLanguageName)
                 .Select(lang => lang.Id).FirstOrDefault();
 
-            //use localizationService to add, update and delete localization resources
             localizationService.AddOrUpdateLocaleResourceAsync(new Dictionary<string, string>
             {
                 //#3075
