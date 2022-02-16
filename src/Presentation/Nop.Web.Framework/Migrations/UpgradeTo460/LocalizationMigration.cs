@@ -28,6 +28,12 @@ namespace Nop.Web.Framework.Migrations.UpgradeTo460
                 .Where(lang => lang.UniqueSeoCode == new CultureInfo(NopCommonDefaults.DefaultLanguageCulture).TwoLetterISOLanguageName)
                 .Select(lang => lang.Id).FirstOrDefault();
 
+            localizationService.DeleteLocaleResourcesAsync(new List<string>
+            {
+                //#5123
+                "Admin.Catalog.Products.Pictures.Alert.AddNew",
+            }).Wait();
+
             //use localizationService to add, update and delete localization resources
             localizationService.AddOrUpdateLocaleResourceAsync(new Dictionary<string, string>
             {

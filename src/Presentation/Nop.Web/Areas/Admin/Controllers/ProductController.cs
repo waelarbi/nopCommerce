@@ -1633,48 +1633,58 @@ namespace Nop.Web.Areas.Admin.Controllers
 
         #region Product pictures
 
-        public virtual async Task<IActionResult> ProductPictureAdd(int pictureId, int displayOrder,
-            string overrideAltAttribute, string overrideTitleAttribute, int productId)
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public virtual async Task<IActionResult> ProductPictureAdd(int productId, IFormCollection form)
         {
             if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
                 return AccessDeniedView();
 
-            if (pictureId == 0)
+            if (productId == 0)
                 throw new ArgumentException();
 
             //try to get a product with the specified id
             var product = await _productService.GetProductByIdAsync(productId)
                 ?? throw new ArgumentException("No product found with the specified id");
 
+            var files = form.Files.ToList();
+            if (!files.Any())
+                return Json(new { success = false });
+
             //a vendor should have access only to his products
             var currentVendor = await _workContext.GetCurrentVendorAsync();
             if (currentVendor != null && product.VendorId != currentVendor.Id)
                 return RedirectToAction("List");
-
-            if ((await _productService.GetProductPicturesByProductIdAsync(productId)).Any(p => p.PictureId == pictureId))
-                return Json(new { Result = false });
-
-            //try to get a picture with the specified id
-            var picture = await _pictureService.GetPictureByIdAsync(pictureId)
-                ?? throw new ArgumentException("No picture found with the specified id");
-
-            await _pictureService.UpdatePictureAsync(picture.Id,
-                await _pictureService.LoadPictureBinaryAsync(picture),
-                picture.MimeType,
-                picture.SeoFilename,
-                overrideAltAttribute,
-                overrideTitleAttribute);
-
-            await _pictureService.SetSeoFilenameAsync(pictureId, await _pictureService.GetPictureSeNameAsync(product.Name));
-
-            await _productService.InsertProductPictureAsync(new ProductPicture
+            try
             {
-                PictureId = pictureId,
-                ProductId = productId,
-                DisplayOrder = displayOrder
-            });
+                foreach (var file in files)
+                {
+                    var fileName = file.FileName;
+                    var contentType = file.ContentType;
 
-            return Json(new { Result = true });
+                    //insert picture
+                    var picture = await _pictureService.InsertPictureAsync(await _downloadService.GetDownloadBitsAsync(file), contentType, _fileProvider.GetFileNameWithoutExtension(fileName));
+
+                    await _pictureService.SetSeoFilenameAsync(picture.Id, await _pictureService.GetPictureSeNameAsync(product.Name));
+
+                    await _productService.InsertProductPictureAsync(new ProductPicture
+                    {
+                        PictureId = picture.Id,
+                        ProductId = product.Id,
+                        DisplayOrder = 0
+                    });
+                }
+            }
+            catch (Exception exc)
+            {
+                return Json(new 
+                    { 
+                        success = false, 
+                        message = $"{await _localizationService.GetResourceAsync("Admin.Catalog.Products.Pictures.Alert.PictureAdd")} {exc.Message}", 
+                    });
+            }
+            
+            return Json(new { success = true });
         }
 
         [HttpPost]

@@ -3519,9 +3519,6 @@
   <LocaleResource Name="Admin.Catalog.Products.Pictures.AddNew">
     <Value>Add a new picture</Value>
   </LocaleResource>
-  <LocaleResource Name="Admin.Catalog.Products.Pictures.Alert.AddNew">
-    <Value>Upload picture first.</Value>
-  </LocaleResource>
   <LocaleResource Name="Admin.Catalog.Products.Pictures.Alert.PictureAdd">
     <Value>Failed to add product picture.</Value>
   </LocaleResource>
