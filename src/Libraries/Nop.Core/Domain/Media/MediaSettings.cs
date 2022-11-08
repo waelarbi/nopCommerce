@@ -5,7 +5,7 @@ namespace Nop.Core.Domain.Media
     /// <summary>
     /// Media settings
     /// </summary>
-    public class MediaSettings : ISettings
+    public partial class MediaSettings : ISettings
     {
         /// <summary>
         /// Picture size of customer avatars (if enabled)
@@ -78,6 +78,11 @@ namespace Nop.Core.Domain.Media
         public bool DefaultPictureZoomEnabled { get; set; }
 
         /// <summary>
+        /// A value indicating whether to allow uploading of SVG files in admin area
+        /// </summary>
+        public bool AllowSVGUploads { get; set; }
+
+        /// <summary>
         /// Maximum allowed picture size. If a larger picture is uploaded, then it'll be resized
         /// </summary>
         public int MaximumImageSize { get; set; }
@@ -116,5 +121,25 @@ namespace Nop.Core.Domain.Media
         /// Gets or sets a value indicating whether need to use absolute pictures path
         /// </summary>
         public bool UseAbsoluteImagePath { get; set; }
+
+        /// <summary>
+        /// Gets or sets the value to specify a policy list for embedded content
+        /// </summary>
+        public string VideoIframeAllow { get; set; }
+
+        /// <summary>
+        /// Gets or sets the width of the frame in CSS pixels
+        /// </summary>
+        public int VideoIframeWidth { get; set; }
+
+        /// <summary>
+        /// Gets or sets the height of the frame in CSS pixels
+        /// </summary>
+        public int VideoIframeHeight { get; set; }
+
+        /// <summary>
+        /// Gets or sets the product default image id. If 0, then wwwroot/images/default-image.png will be used
+        /// </summary>
+        public int ProductDefaultImageId { get; set; }
     }
 }

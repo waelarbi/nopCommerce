@@ -1,4 +1,5 @@
-﻿using Nop.Web.Framework.Mvc.ModelBinding;
+﻿using System.ComponentModel.DataAnnotations;
+using Nop.Web.Framework.Mvc.ModelBinding;
 using Nop.Web.Framework.Models;
 
 namespace Nop.Web.Areas.Admin.Models.Settings
@@ -34,6 +35,11 @@ namespace Nop.Web.Areas.Admin.Models.Settings
         [NopResourceDisplayName("Admin.Configuration.Settings.Media.AssociatedProductPictureSize")]
         public int AssociatedProductPictureSize { get; set; }
         public bool AssociatedProductPictureSize_OverrideForStore { get; set; }
+
+        [NopResourceDisplayName("Admin.Configuration.Settings.Media.ProductDefaultImage")]
+        [UIHint("Picture")]
+        public int ProductDefaultImageId { get; set; }
+        public bool ProductDefaultImageId_OverrideForStore { get; set; }
 
         [NopResourceDisplayName("Admin.Configuration.Settings.Media.CategoryThumbPictureSize")]
         public int CategoryThumbPictureSize { get; set; }
@@ -78,6 +84,10 @@ namespace Nop.Web.Areas.Admin.Models.Settings
         [NopResourceDisplayName("Admin.Configuration.Settings.Media.DefaultPictureZoomEnabled")]
         public bool DefaultPictureZoomEnabled { get; set; }
         public bool DefaultPictureZoomEnabled_OverrideForStore { get; set; }
+
+        [NopResourceDisplayName("Admin.Configuration.Settings.Media.AllowSVGUploads")]
+        public bool AllowSVGUploads { get; set; }
+        public bool AllowSVGUploads_OverrideForStore { get; set; }
 
         #endregion
     }

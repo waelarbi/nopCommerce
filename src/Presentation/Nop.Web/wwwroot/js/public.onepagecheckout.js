@@ -210,30 +210,50 @@ var Billing = {
       type: "GET",
       url: url,
       data: {
-        "addressId": selectedItem
+        addressId: selectedItem,
       },
-      success: function(data, textStatus, jqXHR) {
-        $.each(data,
-          function(id, value) {
-            //console.log("id:" + id + "\nvalue:" + value);
-            if (value !== null) {
-              var val = $(`#${prefix}${id}`).val(value);
-              if (id.indexOf('CountryId') >= 0) {
-                val.trigger('change');
+      success: function (data, textStatus, jqXHR) {
+        $.each(data, function (id, value) {
+          if (value === null)
+            return;
+
+          if (id.indexOf("CustomAddressAttributes") >= 0 && Array.isArray(value)) {
+            $.each(value, function (i, customAttribute) {
+              if (customAttribute.DefaultValue) {
+                $(`#${customAttribute.ControlId}`).val(
+                  customAttribute.DefaultValue
+                );
+              } else {
+                $.each(customAttribute.Values, function (j, attributeValue) {
+                  if (attributeValue.IsPreSelected) {
+                    $(`#${customAttribute.ControlId}`).val(attributeValue.Id);
+                    $(
+                      `#${customAttribute.ControlId}_${attributeValue.Id}`
+                    ).prop("checked", attributeValue.Id);
+                  }
+                });
               }
-              if (id.indexOf('StateProvinceId') >= 0) {
-                Billing.setSelectedStateId(value);
-              }
-            }
-          });
+            });
+
+            return;
+          }
+
+          var val = $(`#${prefix}${id}`).val(value);
+          if (id.indexOf("CountryId") >= 0) {
+            val.trigger("change");
+          }
+          if (id.indexOf("StateProvinceId") >= 0) {
+            Billing.setSelectedStateId(value);
+          }
+        });
       },
-      complete: function(jqXHR, textStatus) {
-        $('#billing-new-address-form').show();
-        $('#edit-address-button').hide();
-        $('#delete-address-button').hide();
-        $('#save-address-button').show();
+      complete: function (jqXHR, textStatus) {
+        $("#billing-new-address-form").show();
+        $("#edit-address-button").hide();
+        $("#delete-address-button").hide();
+        $("#save-address-button").show();
       },
-      error: Checkout.ajaxFailure
+      error: Checkout.ajaxFailure,
     });
   },
 
@@ -553,16 +573,22 @@ var ConfirmOrder = {
     form: false,
     saveUrl: false,
     isSuccess: false,
+    isCaptchaEnabled: false,
+    isReCaptchaV3: false,
+    recaptchaPublicKey: "",
 
-    init: function (saveUrl, successUrl) {
+    init: function (saveUrl, successUrl, isCaptchaEnabled, isReCaptchaV3, recaptchaPublicKey) {
         this.saveUrl = saveUrl;
         this.successUrl = successUrl;
+        this.isCaptchaEnabled = isCaptchaEnabled;
+        this.isReCaptchaV3 = isReCaptchaV3;
+        this.recaptchaPublicKey = recaptchaPublicKey;
     },
 
-  save: function () {
-        if (Checkout.loadWaiting !== false) return;
+  save: async function () {
+    if (Checkout.loadWaiting !== false) return;
 
-        //terms of service
+      //terms of service
         var termOfServiceOk = true;
         if ($('#termsofservice').length > 0) {
             //terms of service element exists
@@ -576,6 +602,12 @@ var ConfirmOrder = {
         if (termOfServiceOk) {
             Checkout.setLoadWaiting('confirm-order');
             var postData = {};
+
+            if (ConfirmOrder.isCaptchaEnabled) {
+                var captchaTok = await ConfirmOrder.getCaptchaToken('OpcConfirmOrder');
+                postData['g-recaptcha-response'] = captchaTok;
+            }
+
             addAntiForgeryToken(postData);
             $.ajax({
                 cache: false,
@@ -589,6 +621,25 @@ var ConfirmOrder = {
         } else {
             return false;
         }
+    },
+
+    getCaptchaToken: async function (action) {
+        var recaptchaToken = ''
+        if (ConfirmOrder.isReCaptchaV3) {
+            grecaptcha.ready(() => {
+                grecaptcha.execute(this.recaptchaPublicKey, { action: action }).then((token) => {
+                    recaptchaToken = token;
+                });
+            });
+        } else {
+            recaptchaToken = grecaptcha.getResponse();
+        }
+
+        while (recaptchaToken == '') {
+            await new Promise(t => setTimeout(t, 100));
+        }
+
+        return recaptchaToken;
     },
 
     resetLoadWaiting: function (transport) {

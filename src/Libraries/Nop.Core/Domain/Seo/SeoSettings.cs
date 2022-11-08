@@ -6,7 +6,7 @@ namespace Nop.Core.Domain.Seo
     /// <summary>
     /// SEO settings
     /// </summary>
-    public class SeoSettings : ISettings
+    public partial class SeoSettings : ISettings
     {
         /// <summary>
         /// Page title separator
@@ -84,7 +84,7 @@ namespace Nop.Core.Domain.Seo
         public bool OpenGraphMetaTags { get; set; }
 
         /// <summary>
-        /// Slugs (sename) reserved for some other needs
+        /// Slugs (seName) reserved for some other needs
         /// </summary>
         public List<string> ReservedUrlRecordSlugs { get; set; }
 

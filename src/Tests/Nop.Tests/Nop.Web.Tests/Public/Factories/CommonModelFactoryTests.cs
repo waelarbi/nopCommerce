@@ -251,21 +251,6 @@ namespace Nop.Tests.Nop.Web.Tests.Public.Factories
         }
 
         [Test]
-        public async Task CanPrepareSitemapModel()
-        {
-            var model = await _commonModelFactory.PrepareSitemapModelAsync(new SitemapPageModel());
-            model.Items.Should().NotBeNullOrEmpty();
-            model.Items.Count.Should().Be(25);
-        }
-
-        [Test]
-        public void PrepareSitemapModelShouldRaiseExceptionIfModelIsNull()
-        {
-            Assert.Throws<AggregateException>(() =>
-                _commonModelFactory.PrepareSitemapModelAsync(null).Wait());
-        }
-
-        [Test]
         public async Task CanPrepareStoreThemeSelectorModel()
         {
             var model = await _commonModelFactory.PrepareStoreThemeSelectorModelAsync();
@@ -288,7 +273,7 @@ namespace Nop.Tests.Nop.Web.Tests.Public.Factories
         {
             var model = await _commonModelFactory.PrepareRobotsTextFileAsync();
             model.Should().NotBeNullOrEmpty();
-            model.Trim().Split("\r\n").Length.Should().Be(74);
+            model.Trim().Split(Environment.NewLine).Length.Should().Be(74);
         }
     }
 }

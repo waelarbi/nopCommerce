@@ -10,7 +10,9 @@ using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
+using Nop.Core.Domain.Security;
 using Nop.Core.Domain.Shipping;
+using Nop.Core.Domain.Tax;
 using Nop.Core.Http.Extensions;
 using Nop.Services.Catalog;
 using Nop.Services.Common;
@@ -21,10 +23,13 @@ using Nop.Services.Logging;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Shipping;
+using Nop.Services.Tax;
 using Nop.Web.Extensions;
 using Nop.Web.Factories;
 using Nop.Web.Framework.Controllers;
+using Nop.Web.Framework.Mvc.Filters;
 using Nop.Web.Models.Checkout;
+using Nop.Web.Models.Common;
 
 namespace Nop.Web.Controllers
 {
@@ -34,8 +39,10 @@ namespace Nop.Web.Controllers
         #region Fields
 
         private readonly AddressSettings _addressSettings;
+        private readonly CaptchaSettings _captchaSettings;
         private readonly CustomerSettings _customerSettings;
-        private readonly IAddressAttributeParser _addressAttributeParser;
+        private readonly IAddressAttributeParser _addressAttributeParser;        
+        private readonly IAddressModelFactory _addressModelFactory;
         private readonly IAddressService _addressService;
         private readonly ICheckoutModelFactory _checkoutModelFactory;
         private readonly ICountryService _countryService;
@@ -51,20 +58,24 @@ namespace Nop.Web.Controllers
         private readonly IShippingService _shippingService;
         private readonly IShoppingCartService _shoppingCartService;
         private readonly IStoreContext _storeContext;
+        private readonly ITaxService _taxService;
         private readonly IWebHelper _webHelper;
         private readonly IWorkContext _workContext;
         private readonly OrderSettings _orderSettings;
         private readonly PaymentSettings _paymentSettings;
         private readonly RewardPointsSettings _rewardPointsSettings;
         private readonly ShippingSettings _shippingSettings;
+        private readonly TaxSettings _taxSettings;
 
         #endregion
 
         #region Ctor
 
         public CheckoutController(AddressSettings addressSettings,
+            CaptchaSettings captchaSettings,
             CustomerSettings customerSettings,
             IAddressAttributeParser addressAttributeParser,
+            IAddressModelFactory addressModelFactory,
             IAddressService addressService,
             ICheckoutModelFactory checkoutModelFactory,
             ICountryService countryService,
@@ -80,16 +91,20 @@ namespace Nop.Web.Controllers
             IShippingService shippingService,
             IShoppingCartService shoppingCartService,
             IStoreContext storeContext,
+            ITaxService taxService,
             IWebHelper webHelper,
             IWorkContext workContext,
             OrderSettings orderSettings,
             PaymentSettings paymentSettings,
             RewardPointsSettings rewardPointsSettings,
-            ShippingSettings shippingSettings)
+            ShippingSettings shippingSettings,
+            TaxSettings taxSettings)
         {
             _addressSettings = addressSettings;
+            _captchaSettings = captchaSettings;
             _customerSettings = customerSettings;
             _addressAttributeParser = addressAttributeParser;
+            _addressModelFactory = addressModelFactory;
             _addressService = addressService;
             _checkoutModelFactory = checkoutModelFactory;
             _countryService = countryService;
@@ -105,12 +120,14 @@ namespace Nop.Web.Controllers
             _shippingService = shippingService;
             _shoppingCartService = shoppingCartService;
             _storeContext = storeContext;
+            _taxService = taxService;
             _webHelper = webHelper;
             _workContext = workContext;
             _orderSettings = orderSettings;
             _paymentSettings = paymentSettings;
             _rewardPointsSettings = rewardPointsSettings;
             _shippingSettings = shippingSettings;
+            _taxSettings = taxSettings;
         }
 
         #endregion
@@ -154,17 +171,22 @@ namespace Nop.Web.Controllers
         /// <summary>
         /// Parses the pickup option
         /// </summary>
+        /// <param name="cart">Shopping Cart</param>
         /// <param name="form">The form</param>
         /// <returns>
         /// The task result contains the pickup option
         /// </returns>
-        protected virtual async Task<PickupPoint> ParsePickupOptionAsync(IFormCollection form)
+        protected virtual async Task<PickupPoint> ParsePickupOptionAsync(IList<ShoppingCartItem> cart, IFormCollection form)
         {
             var pickupPoint = form["pickup-points-id"].ToString().Split(new[] { "___" }, StringSplitOptions.None);
 
             var customer = await _workContext.GetCurrentCustomerAsync();
             var store = await _storeContext.GetCurrentStoreAsync();
-            var selectedPoint = (await _shippingService.GetPickupPointsAsync(customer.BillingAddressId ?? 0,
+            var address = customer.BillingAddressId.HasValue
+                ? await _addressService.GetAddressByIdAsync(customer.BillingAddressId.Value)
+                : null;
+
+            var selectedPoint = (await _shippingService.GetPickupPointsAsync(cart, address,
                 customer, pickupPoint[1], store.Id)).PickupPoints.FirstOrDefault(x => x.Id.Equals(pickupPoint[0]));
 
             if (selectedPoint == null)
@@ -195,6 +217,31 @@ namespace Nop.Web.Controllers
             var store = await _storeContext.GetCurrentStoreAsync();
             await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.SelectedShippingOptionAttribute, pickUpInStoreShippingOption, store.Id);
             await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.SelectedPickupPointAttribute, pickupPoint, store.Id);
+        }
+
+        /// <summary>
+        /// Save customer VAT number
+        /// </summary>
+        /// <param name="fullVatNumber">The full VAT number</param>
+        /// <param name="customer">The customer</param>
+        /// <returns>
+        /// A task that represents the asynchronous operation
+        /// The task result contains the Vat number error if exists
+        /// </returns>
+        protected virtual async Task<string> SaveCustomerVatNumberAsync(string fullVatNumber, Customer customer)
+        {
+            var (vatNumberStatus, _, _) = await _taxService.GetVatNumberStatusAsync(fullVatNumber);
+            customer.VatNumberStatus = vatNumberStatus;
+            customer.VatNumber = fullVatNumber;
+            await _customerService.UpdateCustomerAsync(customer);
+
+            if (vatNumberStatus != VatNumberStatus.Valid && !string.IsNullOrEmpty(fullVatNumber))
+            {
+                var warning = await _localizationService.GetResourceAsync("Checkout.VatNumber.Warning");
+                return string.Format(warning, await _localizationService.GetLocalizedEnumAsync(vatNumberStatus));
+            }
+
+            return string.Empty;
         }
 
         #endregion
@@ -320,7 +367,16 @@ namespace Nop.Web.Controllers
             if (address == null)
                 throw new ArgumentNullException(nameof(address));
 
-            var json = JsonConvert.SerializeObject(address, Formatting.Indented,
+            var addressModel = new AddressModel();
+
+            await _addressModelFactory.PrepareAddressModelAsync(addressModel,
+                address: address,
+                excludeProperties: false,
+                addressSettings: _addressSettings,
+                prePopulateWithCustomerFields: true,
+                customer: customer);
+
+            var json = JsonConvert.SerializeObject(addressModel, Formatting.Indented,
                 new JsonSerializerSettings
                 {
                     ReferenceLoopHandling = ReferenceLoopHandling.Ignore
@@ -335,7 +391,7 @@ namespace Nop.Web.Controllers
         /// <param name="model"></param>
         /// <param name="opc"></param>
         /// <returns></returns>
-        public virtual async Task<IActionResult> SaveEditAddress(CheckoutBillingAddressModel model, bool opc = false)
+        public virtual async Task<IActionResult> SaveEditAddress(CheckoutBillingAddressModel model, IFormCollection form, bool opc = false)
         {
             try
             {
@@ -350,7 +406,18 @@ namespace Nop.Web.Controllers
                 if (address == null)
                     throw new Exception("Address can't be loaded");
 
+                //custom address attributes
+                var customAttributes = await _addressAttributeParser.ParseCustomAddressAttributesAsync(form);
+                var customAttributeWarnings = await _addressAttributeParser.GetAttributeWarningsAsync(customAttributes);
+
+                if(customAttributeWarnings.Any())
+                {
+                    return Json(new { error = 1, message = customAttributeWarnings });
+                }
+
                 address = model.BillingNewAddress.ToEntity(address);
+                address.CustomAttributes = customAttributes;
+
                 await _addressService.UpdateAddressAsync(address);
 
                 customer.BillingAddressId = address.Id;
@@ -521,6 +588,13 @@ namespace Nop.Web.Controllers
             if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
                 return Challenge();
 
+            if (await _customerService.IsGuestAsync(customer) && _taxSettings.EuVatEnabled && _taxSettings.EuVatEnabledForGuests)
+            {
+                var warning = await SaveCustomerVatNumberAsync(model.VatNumber, customer);
+                if (!string.IsNullOrEmpty(warning))
+                    ModelState.AddModelError("", warning);
+            }
+
             //custom address attributes
             var customAttributes = await _addressAttributeParser.ParseCustomAddressAttributesAsync(form);
             var customAttributeWarnings = await _addressAttributeParser.GetAttributeWarningsAsync(customAttributes);
@@ -669,7 +743,7 @@ namespace Nop.Web.Controllers
                 var pickupInStore = ParsePickupInStore(form);
                 if (pickupInStore)
                 {
-                    var pickupOption = await ParsePickupOptionAsync(form);
+                    var pickupOption = await ParsePickupOptionAsync(cart, form);
                     await SavePickupOptionAsync(pickupOption);
 
                     return RedirectToRoute("CheckoutPaymentMethod");
@@ -815,7 +889,7 @@ namespace Nop.Web.Controllers
                 var pickupInStore = ParsePickupInStore(form);
                 if (pickupInStore)
                 {
-                    var pickupOption = await ParsePickupOptionAsync(form);
+                    var pickupOption = await ParsePickupOptionAsync(cart, form);
                     await SavePickupOptionAsync(pickupOption);
 
                     return RedirectToRoute("CheckoutPaymentMethod");
@@ -1101,8 +1175,9 @@ namespace Nop.Web.Controllers
             return View(model);
         }
 
+        [ValidateCaptcha]
         [HttpPost, ActionName("Confirm")]
-        public virtual async Task<IActionResult> ConfirmOrder()
+        public virtual async Task<IActionResult> ConfirmOrder(bool captchaValid)
         {
             //validation
             if (_orderSettings.CheckoutDisabled)
@@ -1123,6 +1198,17 @@ namespace Nop.Web.Controllers
 
             //model
             var model = await _checkoutModelFactory.PrepareConfirmOrderModelAsync(cart);
+
+            var isCaptchaSettingEnabled = await _customerService.IsGuestAsync(customer) &&
+                _captchaSettings.Enabled && _captchaSettings.ShowOnCheckoutPageForGuests;
+
+            //captcha validation for guest customers
+            if (isCaptchaSettingEnabled && !captchaValid)
+            {
+                model.Warnings.Add(await _localizationService.GetResourceAsync("Common.WrongCaptchaMessage"));
+                return View(model);
+            }
+
             try
             {
                 //prevent 2 orders being placed within an X seconds time frame
@@ -1370,6 +1456,13 @@ namespace Nop.Web.Controllers
                 }
                 else
                 {
+                    if (await _customerService.IsGuestAsync(customer) && _taxSettings.EuVatEnabled && _taxSettings.EuVatEnabledForGuests)
+                    {
+                        var warning = await SaveCustomerVatNumberAsync(model.VatNumber, customer);
+                        if (!string.IsNullOrEmpty(warning))
+                            ModelState.AddModelError("", warning);
+                    }
+
                     //new address
                     var newAddress = model.BillingNewAddress;
 
@@ -1509,7 +1602,7 @@ namespace Nop.Web.Controllers
                     var pickupInStore = ParsePickupInStore(form);
                     if (pickupInStore)
                     {
-                        var pickupOption = await ParsePickupOptionAsync(form);
+                        var pickupOption = await ParsePickupOptionAsync(cart, form);
                         await SavePickupOptionAsync(pickupOption);
 
                         return await OpcLoadStepAfterShippingMethod(cart);
@@ -1625,7 +1718,7 @@ namespace Nop.Web.Controllers
                     var pickupInStore = ParsePickupInStore(form);
                     if (pickupInStore)
                     {
-                        var pickupOption = await ParsePickupOptionAsync(form);
+                        var pickupOption = await ParsePickupOptionAsync(cart, form);
                         await SavePickupOptionAsync(pickupOption);
 
                         return await OpcLoadStepAfterShippingMethod(cart);
@@ -1823,87 +1916,104 @@ namespace Nop.Web.Controllers
             }
         }
 
+        [ValidateCaptcha]
         [HttpPost]
-        public virtual async Task<IActionResult> OpcConfirmOrder()
+        public virtual async Task<IActionResult> OpcConfirmOrder(bool captchaValid)
         {
             try
             {
-                //validation
-                if (_orderSettings.CheckoutDisabled)
-                    throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
-
                 var customer = await _workContext.GetCurrentCustomerAsync();
-                var store = await _storeContext.GetCurrentStoreAsync();
-                var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
 
-                if (!cart.Any())
-                    throw new Exception("Your cart is empty");
+                var isCaptchaSettingEnabled = await _customerService.IsGuestAsync(customer) && 
+                    _captchaSettings.Enabled && _captchaSettings.ShowOnCheckoutPageForGuests;
 
-                if (!_orderSettings.OnePageCheckoutEnabled)
-                    throw new Exception("One page checkout is disabled");
+                var confirmOrderModel = new CheckoutConfirmModel()
+                { 
+                    DisplayCaptcha = isCaptchaSettingEnabled
+                };
 
-                if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-                    throw new Exception("Anonymous checkout is not allowed");
-
-                //prevent 2 orders being placed within an X seconds time frame
-                if (!await IsMinimumOrderPlacementIntervalValidAsync(customer))
-                    throw new Exception(await _localizationService.GetResourceAsync("Checkout.MinOrderPlacementInterval"));
-
-                //place order
-                var processPaymentRequest = HttpContext.Session.Get<ProcessPaymentRequest>("OrderPaymentInfo");
-                if (processPaymentRequest == null)
+                //captcha validation for guest customers
+                if (!isCaptchaSettingEnabled || (isCaptchaSettingEnabled && captchaValid))
                 {
-                    //Check whether payment workflow is required
-                    if (await _orderProcessingService.IsPaymentWorkflowRequiredAsync(cart))
+                    //validation
+                    if (_orderSettings.CheckoutDisabled)
+                        throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+
+                    var store = await _storeContext.GetCurrentStoreAsync();
+                    var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
+
+                    if (!cart.Any())
+                        throw new Exception("Your cart is empty");
+
+                    if (!_orderSettings.OnePageCheckoutEnabled)
+                        throw new Exception("One page checkout is disabled");
+
+                    if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
+                        throw new Exception("Anonymous checkout is not allowed");
+
+                    //prevent 2 orders being placed within an X seconds time frame
+                    if (!await IsMinimumOrderPlacementIntervalValidAsync(customer))
+                        throw new Exception(await _localizationService.GetResourceAsync("Checkout.MinOrderPlacementInterval"));
+
+                    //place order
+                    var processPaymentRequest = HttpContext.Session.Get<ProcessPaymentRequest>("OrderPaymentInfo");
+                    if (processPaymentRequest == null)
                     {
-                        throw new Exception("Payment information is not entered");
+                        //Check whether payment workflow is required
+                        if (await _orderProcessingService.IsPaymentWorkflowRequiredAsync(cart))
+                        {
+                            throw new Exception("Payment information is not entered");
+                        }
+
+                        processPaymentRequest = new ProcessPaymentRequest();
                     }
-
-                    processPaymentRequest = new ProcessPaymentRequest();
-                }
-                _paymentService.GenerateOrderGuid(processPaymentRequest);
-                processPaymentRequest.StoreId = store.Id;
-                processPaymentRequest.CustomerId = customer.Id;
-                processPaymentRequest.PaymentMethodSystemName = await _genericAttributeService.GetAttributeAsync<string>(customer,
-                    NopCustomerDefaults.SelectedPaymentMethodAttribute, store.Id);
-                HttpContext.Session.Set<ProcessPaymentRequest>("OrderPaymentInfo", processPaymentRequest);
-                var placeOrderResult = await _orderProcessingService.PlaceOrderAsync(processPaymentRequest);
-                if (placeOrderResult.Success)
-                {
-                    HttpContext.Session.Set<ProcessPaymentRequest>("OrderPaymentInfo", null);
-                    var postProcessPaymentRequest = new PostProcessPaymentRequest
+                    _paymentService.GenerateOrderGuid(processPaymentRequest);
+                    processPaymentRequest.StoreId = store.Id;
+                    processPaymentRequest.CustomerId = customer.Id;
+                    processPaymentRequest.PaymentMethodSystemName = await _genericAttributeService.GetAttributeAsync<string>(customer,
+                        NopCustomerDefaults.SelectedPaymentMethodAttribute, store.Id);
+                    HttpContext.Session.Set<ProcessPaymentRequest>("OrderPaymentInfo", processPaymentRequest);
+                    var placeOrderResult = await _orderProcessingService.PlaceOrderAsync(processPaymentRequest);
+                    if (placeOrderResult.Success)
                     {
-                        Order = placeOrderResult.PlacedOrder
-                    };
+                        HttpContext.Session.Set<ProcessPaymentRequest>("OrderPaymentInfo", null);
+                        var postProcessPaymentRequest = new PostProcessPaymentRequest
+                        {
+                            Order = placeOrderResult.PlacedOrder
+                        };
 
-                    var paymentMethod = await _paymentPluginManager
-                        .LoadPluginBySystemNameAsync(placeOrderResult.PlacedOrder.PaymentMethodSystemName, customer, store.Id);
-                    if (paymentMethod == null)
-                        //payment method could be null if order total is 0
+                        var paymentMethod = await _paymentPluginManager
+                            .LoadPluginBySystemNameAsync(placeOrderResult.PlacedOrder.PaymentMethodSystemName, customer, store.Id);
+                        if (paymentMethod == null)
+                            //payment method could be null if order total is 0
+                            //success
+                            return Json(new { success = 1 });
+
+                        if (paymentMethod.PaymentMethodType == PaymentMethodType.Redirection)
+                        {
+                            //Redirection will not work because it's AJAX request.
+                            //That's why we don't process it here (we redirect a user to another page where he'll be redirected)
+
+                            //redirect
+                            return Json(new
+                            {
+                                redirect = $"{_webHelper.GetStoreLocation()}checkout/OpcCompleteRedirectionPayment"
+                            });
+                        }
+
+                        await _paymentService.PostProcessPaymentAsync(postProcessPaymentRequest);
                         //success
                         return Json(new { success = 1 });
-
-                    if (paymentMethod.PaymentMethodType == PaymentMethodType.Redirection)
-                    {
-                        //Redirection will not work because it's AJAX request.
-                        //That's why we don't process it here (we redirect a user to another page where he'll be redirected)
-
-                        //redirect
-                        return Json(new
-                        {
-                            redirect = $"{_webHelper.GetStoreLocation()}checkout/OpcCompleteRedirectionPayment"
-                        });
                     }
 
-                    await _paymentService.PostProcessPaymentAsync(postProcessPaymentRequest);
-                    //success
-                    return Json(new { success = 1 });
+                    //error
+                    foreach (var error in placeOrderResult.Errors)
+                        confirmOrderModel.Warnings.Add(error);
                 }
-
-                //error
-                var confirmOrderModel = new CheckoutConfirmModel();
-                foreach (var error in placeOrderResult.Errors)
-                    confirmOrderModel.Warnings.Add(error);
+                else
+                {
+                    confirmOrderModel.Warnings.Add(await _localizationService.GetResourceAsync("Common.WrongCaptchaMessage"));
+                }
 
                 return Json(new
                 {

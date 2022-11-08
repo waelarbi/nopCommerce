@@ -1351,10 +1351,13 @@ namespace Nop.Services.Messages
             var productAttributeFormatter = EngineContext.Current.Resolve<IProductAttributeFormatter>();
 
             var product = await _productService.GetProductByIdAsync(combination.ProductId);
-
+            var currentCustomer = await _workContext.GetCurrentCustomerAsync();
+            var currentStore = await _storeContext.GetCurrentStoreAsync();
+            
             var attributes = await productAttributeFormatter.FormatAttributesAsync(product,
                 combination.AttributesXml,
-                await _workContext.GetCurrentCustomerAsync(),
+                currentCustomer,
+                currentStore,
                 renderPrices: false);
 
             tokens.Add(new Token("AttributeCombination.Formatted", attributes, true));
@@ -1504,7 +1507,10 @@ namespace Nop.Services.Messages
         /// </returns>
         public virtual async Task<IEnumerable<string>> GetListOfAllowedTokensAsync(IEnumerable<string> tokenGroups = null)
         {
-            var additionalTokens = new AdditionalTokensAddedEvent();
+            var additionalTokens = new AdditionalTokensAddedEvent
+            {
+                TokenGroups = tokenGroups
+            };
             await _eventPublisher.PublishAsync(additionalTokens);
 
             var allowedTokens = AllowedTokens.Where(x => tokenGroups == null || tokenGroups.Contains(x.Key))
@@ -1538,7 +1544,8 @@ namespace Nop.Services.Messages
                 MessageTemplateSystemNames.OrderPaidCustomerNotification or 
                 MessageTemplateSystemNames.OrderPaidVendorNotification or 
                 MessageTemplateSystemNames.OrderPaidAffiliateNotification or 
-                MessageTemplateSystemNames.OrderPlacedCustomerNotification or 
+                MessageTemplateSystemNames.OrderPlacedCustomerNotification or
+                MessageTemplateSystemNames.OrderProcessingCustomerNotification or
                 MessageTemplateSystemNames.OrderCompletedCustomerNotification or 
                 MessageTemplateSystemNames.OrderCancelledCustomerNotification => new[] { TokenGroupNames.StoreTokens, TokenGroupNames.OrderTokens, TokenGroupNames.CustomerTokens },
 

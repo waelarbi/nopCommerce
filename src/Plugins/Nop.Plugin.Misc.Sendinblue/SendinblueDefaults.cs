@@ -204,6 +204,11 @@ namespace Nop.Plugin.Misc.Sendinblue
         public static string FaxServiceAttribute => "FAX";
 
         /// <summary>
+        /// Gets a name of attribute to store a language
+        /// </summary>
+        public static string LanguageAttribute => "LANGUAGE";
+
+        /// <summary>
         /// Gets a name of attribute to store a store identifier
         /// </summary>
         public static string StoreIdServiceAttribute => "STORE_ID";
@@ -267,6 +272,11 @@ namespace Nop.Plugin.Misc.Sendinblue
         /// Gets a header of the marketing automation authentication key
         /// </summary>
         public static string MarketingAutomationKeyHeader => "ma-key";
+
+        /// <summary>
+        /// Gets the marketing automation services URL
+        /// </summary>
+        public static string MarketingAutomationUrl => "https://in-automate.sendinblue.com/api/v2/";
 
         /// <summary>
         /// Gets a key of the attribute to store template identifier

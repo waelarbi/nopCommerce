@@ -268,7 +268,7 @@ namespace Nop.Services.Installation
             //max length
             seName = CommonHelper.EnsureMaximumLength(seName, NopSeoDefaults.SearchEngineNameLength);
 
-            //ensure this sename is not reserved yet
+            //ensure this seName is not reserved yet
             var i = 2;
             var tempSeName = seName;
             while (true)
@@ -771,7 +771,7 @@ namespace Nop.Services.Installation
                 },
                 new ProductAvailabilityRange
                 {
-                    Name = "2 week",
+                    Name = "2 weeks",
                     DisplayOrder = 3
                 }
             };
@@ -2323,6 +2323,14 @@ namespace Nop.Services.Installation
                 },
                 new MessageTemplate
                 {
+                    Name = MessageTemplateSystemNames.OrderProcessingCustomerNotification,
+                    Subject = "%Store.Name%. Your order is processing",
+                    Body = $"<p>{Environment.NewLine}<a href=\"%Store.URL%\">%Store.Name%</a>{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Hello %Order.CustomerFullName%,{Environment.NewLine}<br />{Environment.NewLine}Your order is processing. Below is the summary of the order.{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Order Number: %Order.OrderNumber%{Environment.NewLine}<br />{Environment.NewLine}Order Details: <a target=\"_blank\" href=\"%Order.OrderURLForCustomer%\">%Order.OrderURLForCustomer%</a>{Environment.NewLine}<br />{Environment.NewLine}Date Ordered: %Order.CreatedOn%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Billing Address{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingFirstName% %Order.BillingLastName%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingAddress1%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingAddress2%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingCity% %Order.BillingZipPostalCode%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingStateProvince% %Order.BillingCountry%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}%if (%Order.Shippable%) Shipping Address{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingFirstName% %Order.ShippingLastName%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingAddress1%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingAddress2%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingCity% %Order.ShippingZipPostalCode%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingStateProvince% %Order.ShippingCountry%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Shipping Method: %Order.ShippingMethod%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine} endif% %Order.Product(s)%{Environment.NewLine}</p>{Environment.NewLine}",
+                    IsActive = false,
+                    EmailAccountId = eaGeneral.Id
+                },
+                new MessageTemplate
+                {
                     Name = MessageTemplateSystemNames.OrderCompletedCustomerNotification,
                     Subject = "%Store.Name%. Your order completed",
                     Body = $"<p>{Environment.NewLine}<a href=\"%Store.URL%\">%Store.Name%</a>{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Hello %Order.CustomerFullName%,{Environment.NewLine}<br />{Environment.NewLine}Your order has been completed. Below is the summary of the order.{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Order Number: %Order.OrderNumber%{Environment.NewLine}<br />{Environment.NewLine}Order Details: <a target=\"_blank\" href=\"%Order.OrderURLForCustomer%\">%Order.OrderURLForCustomer%</a>{Environment.NewLine}<br />{Environment.NewLine}Date Ordered: %Order.CreatedOn%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Billing Address{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingFirstName% %Order.BillingLastName%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingAddress1%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingAddress2%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingCity% %Order.BillingZipPostalCode%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingStateProvince% %Order.BillingCountry%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}%if (%Order.Shippable%) Shipping Address{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingFirstName% %Order.ShippingLastName%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingAddress1%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingAddress2%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingCity% %Order.ShippingZipPostalCode%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingStateProvince% %Order.ShippingCountry%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Shipping Method: %Order.ShippingMethod%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine} endif% %Order.Product(s)%{Environment.NewLine}</p>{Environment.NewLine}",
@@ -2785,7 +2793,6 @@ namespace Nop.Services.Installation
             await settingService.SaveSettingAsync(new CommonSettings
             {
                 UseSystemEmailForContactUsForm = true,
-
                 DisplayJavaScriptDisabledWarning = false,
                 Log404Errors = true,
                 BreadcrumbDelimiter = "/",
@@ -2793,9 +2800,12 @@ namespace Nop.Services.Installation
                 PopupForTermsOfServiceLinks = true,
                 JqueryMigrateScriptLoggingActive = false,
                 UseResponseCompression = true,
-                FaviconAndAppIconsHeadCode = "<link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"/icons/icons_0/apple-touch-icon.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"/icons/icons_0/favicon-32x32.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"192x192\" href=\"/icons/icons_0/android-chrome-192x192.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"16x16\" href=\"/icons/icons_0/favicon-16x16.png\"><link rel=\"manifest\" href=\"/icons/icons_0/site.webmanifest\"><link rel=\"mask-icon\" href=\"/icons/icons_0/safari-pinned-tab.svg\" color=\"#5bbad5\"><link rel=\"shortcut icon\" href=\"/icons/icons_0/favicon.ico\"><meta name=\"msapplication-TileColor\" content=\"#2d89ef\"><meta name=\"msapplication-TileImage\" content=\"/icons/icons_0/mstile-144x144.png\"><meta name=\"msapplication-config\" content=\"/icons/icons_0/browserconfig.xml\"><meta name=\"theme-color\" content=\"#ffffff\">",
+                FaviconAndAppIconsHeadCode =
+                    "<link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"/icons/icons_0/apple-touch-icon.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"/icons/icons_0/favicon-32x32.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"192x192\" href=\"/icons/icons_0/android-chrome-192x192.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"16x16\" href=\"/icons/icons_0/favicon-16x16.png\"><link rel=\"manifest\" href=\"/icons/icons_0/site.webmanifest\"><link rel=\"mask-icon\" href=\"/icons/icons_0/safari-pinned-tab.svg\" color=\"#5bbad5\"><link rel=\"shortcut icon\" href=\"/icons/icons_0/favicon.ico\"><meta name=\"msapplication-TileColor\" content=\"#2d89ef\"><meta name=\"msapplication-TileImage\" content=\"/icons/icons_0/mstile-144x144.png\"><meta name=\"msapplication-config\" content=\"/icons/icons_0/browserconfig.xml\"><meta name=\"theme-color\" content=\"#ffffff\">",
                 EnableHtmlMinification = true,
-                RestartTimeout = NopCommonDefaults.RestartTimeout
+                RestartTimeout = NopCommonDefaults.RestartTimeout,
+                HeaderCustomHtml = string.Empty,
+                FooterCustomHtml = string.Empty
             });
 
             await settingService.SaveSettingAsync(new SeoSettings
@@ -2846,6 +2856,7 @@ namespace Nop.Services.Installation
 
             await settingService.SaveSettingAsync(new GdprSettings
             {
+                DeleteInactiveCustomersAfterMonths = 36,
                 GdprEnabled = false,
                 LogPrivacyPolicyConsent = true,
                 LogNewsletterConsent = true,
@@ -2862,6 +2873,7 @@ namespace Nop.Services.Installation
                 ShowManufacturerPartNumber = false,
                 ShowGtin = false,
                 ShowFreeShippingNotification = true,
+                ShowShortDescriptionOnCatalogPages = false,
                 AllowProductSorting = true,
                 AllowProductViewModeChanging = true,
                 DefaultViewMode = "grid",
@@ -2870,7 +2882,8 @@ namespace Nop.Services.Installation
                 ShowCategoryProductNumberIncludingSubcategories = false,
                 CategoryBreadcrumbEnabled = true,
                 ShowShareButton = true,
-                PageShareCode = "<!-- AddThis Button BEGIN --><div class=\"addthis_toolbox addthis_default_style \"><a class=\"addthis_button_preferred_1\"></a><a class=\"addthis_button_preferred_2\"></a><a class=\"addthis_button_preferred_3\"></a><a class=\"addthis_button_preferred_4\"></a><a class=\"addthis_button_compact\"></a><a class=\"addthis_counter addthis_bubble_style\"></a></div><script src=\"http://s7.addthis.com/js/250/addthis_widget.js#pubid=nopsolutions\"></script><!-- AddThis Button END -->",
+                PageShareCode =
+                    "<!-- AddThis Button BEGIN --><div class=\"addthis_toolbox addthis_default_style \"><a class=\"addthis_button_preferred_1\"></a><a class=\"addthis_button_preferred_2\"></a><a class=\"addthis_button_preferred_3\"></a><a class=\"addthis_button_preferred_4\"></a><a class=\"addthis_button_compact\"></a><a class=\"addthis_counter addthis_bubble_style\"></a></div><script src=\"http://s7.addthis.com/js/250/addthis_widget.js#pubid=nopsolutions\"></script><!-- AddThis Button END -->",
                 ProductReviewsMustBeApproved = false,
                 OneReviewPerProductFromCustomer = false,
                 DefaultProductRatingValue = 5,
@@ -2882,8 +2895,10 @@ namespace Nop.Services.Installation
                 AllowAnonymousUsersToEmailAFriend = false,
                 RecentlyViewedProductsNumber = 3,
                 RecentlyViewedProductsEnabled = true,
-                NewProductsNumber = 6,
                 NewProductsEnabled = true,
+                NewProductsPageSize = 6,
+                NewProductsAllowCustomersToSelectPageSize = true,
+                NewProductsPageSizeOptions = "6, 3, 9",
                 CompareProductsEnabled = true,
                 CompareProductsNumber = 4,
                 ProductSearchAutoCompleteEnabled = true,
@@ -2949,14 +2964,19 @@ namespace Nop.Services.Installation
                 EnableManufacturerFiltering = true,
                 EnablePriceRangeFiltering = true,
                 EnableSpecificationAttributeFiltering = true,
+                DisplayFromPrices = false,
                 AttributeValueOutOfStockDisplayType = AttributeValueOutOfStockDisplayType.AlwaysDisplay,
                 AllowCustomersToSearchWithCategoryName = true,
-                AllowCustomersToSearchWithManufacturerName = true
+                AllowCustomersToSearchWithManufacturerName = true,
+                DisplayAllPicturesOnCatalogPages = false,
+                ProductUrlStructureTypeId = (int)ProductUrlStructureType.Product
             });
 
             await settingService.SaveSettingAsync(new LocalizationSettings
             {
-                DefaultAdminLanguageId = _languageRepository.Table.Single(l => l.LanguageCulture == NopCommonDefaults.DefaultLanguageCulture).Id,
+                DefaultAdminLanguageId =
+                    _languageRepository.Table
+                        .Single(l => l.LanguageCulture == NopCommonDefaults.DefaultLanguageCulture).Id,
                 UseImagesForLanguageSelection = false,
                 SeoFriendlyUrlsForLanguagesEnabled = false,
                 AutomaticallyDetectLanguage = false,
@@ -3076,11 +3096,15 @@ namespace Nop.Services.Installation
                 ImageSquarePictureSize = 32,
                 MaximumImageSize = 1980,
                 DefaultPictureZoomEnabled = false,
+                AllowSVGUploads = false,
                 DefaultImageQuality = 80,
                 MultipleThumbDirectories = false,
                 ImportProductImagesUsingHash = true,
                 AzureCacheControlHeader = string.Empty,
-                UseAbsoluteImagePath = true
+                UseAbsoluteImagePath = true,
+                VideoIframeAllow = "fullscreen",
+                VideoIframeWidth = 300,
+                VideoIframeHeight = 150
             });
 
             await settingService.SaveSettingAsync(new StoreInformationSettings
@@ -3098,9 +3122,7 @@ namespace Nop.Services.Installation
 
             await settingService.SaveSettingAsync(new ExternalAuthenticationSettings
             {
-                RequireEmailValidation = false,
-                LogErrors = false,
-                AllowCustomersToRemoveAssociations = true
+                RequireEmailValidation = false, LogErrors = false, AllowCustomersToRemoveAssociations = true
             });
 
             await settingService.SaveSettingAsync(new RewardPointsSettings
@@ -3126,8 +3148,10 @@ namespace Nop.Services.Installation
             await settingService.SaveSettingAsync(new CurrencySettings
             {
                 DisplayCurrencyLabel = false,
-                PrimaryStoreCurrencyId = _currencyRepository.Table.Single(c => c.CurrencyCode == primaryCurrency).Id,
-                PrimaryExchangeRateCurrencyId = _currencyRepository.Table.Single(c => c.CurrencyCode == primaryCurrency).Id,
+                PrimaryStoreCurrencyId =
+                    _currencyRepository.Table.Single(c => c.CurrencyCode == primaryCurrency).Id,
+                PrimaryExchangeRateCurrencyId =
+                    _currencyRepository.Table.Single(c => c.CurrencyCode == primaryCurrency).Id,
                 ActiveExchangeRateProviderSystemName = "CurrencyExchange.ECB",
                 AutoUpdateEnabled = false
             });
@@ -3137,16 +3161,14 @@ namespace Nop.Services.Installation
 
             await settingService.SaveSettingAsync(new MeasureSettings
             {
-                BaseDimensionId = _measureDimensionRepository.Table.Single(m => m.SystemKeyword == baseDimension).Id,
+                BaseDimensionId =
+                    _measureDimensionRepository.Table.Single(m => m.SystemKeyword == baseDimension).Id,
                 BaseWeightId = _measureWeightRepository.Table.Single(m => m.SystemKeyword == baseWeight).Id
             });
 
             await settingService.SaveSettingAsync(new MessageTemplatesSettings
             {
-                CaseInvariantReplacement = false,
-                Color1 = "#b9babe",
-                Color2 = "#ebecee",
-                Color3 = "#dde2e6"
+                CaseInvariantReplacement = false, Color1 = "#b9babe", Color2 = "#ebecee", Color3 = "#dde2e6"
             });
 
             await settingService.SaveSettingAsync(new ShoppingCartSettings
@@ -3191,6 +3213,7 @@ namespace Nop.Services.Installation
                 DisableOrderCompletedPage = false,
                 DisplayPickupInStoreOnShippingMethodPage = false,
                 AttachPdfInvoiceToOrderPlacedEmail = false,
+                AttachPdfInvoiceToOrderProcessingEmail = false,
                 AttachPdfInvoiceToOrderCompletedEmail = false,
                 GeneratePdfInvoiceInCustomerLanguage = true,
                 AttachPdfInvoiceToOrderPaidEmail = false,
@@ -3250,11 +3273,7 @@ namespace Nop.Services.Installation
 
             await settingService.SaveSettingAsync(new PaymentSettings
             {
-                ActivePaymentMethodSystemNames = new List<string>
-                    {
-                        "Payments.CheckMoneyOrder",
-                        "Payments.Manual"
-                    },
+                ActivePaymentMethodSystemNames = new List<string> { "Payments.CheckMoneyOrder", "Payments.Manual" },
                 AllowRePostingPayments = true,
                 BypassPaymentMethodSelectionIfOnlyOne = true,
                 ShowPaymentMethodDescriptions = true,
@@ -3285,7 +3304,11 @@ namespace Nop.Services.Installation
                 PaymentMethodAdditionalFeeIncludesTax = false,
                 PaymentMethodAdditionalFeeTaxClassId = 0,
                 EuVatEnabled = isEurope,
-                EuVatShopCountryId = isEurope ? (_countryRepository.Table.FirstOrDefault(x => x.TwoLetterIsoCode == country)?.Id ?? 0) : 0,
+                EuVatEnabledForGuests = false,
+                EuVatShopCountryId =
+                    isEurope
+                        ? (_countryRepository.Table.FirstOrDefault(x => x.TwoLetterIsoCode == country)?.Id ?? 0)
+                        : 0,
                 EuVatAllowVatExemption = true,
                 EuVatUseWebService = false,
                 EuVatAssumeValid = false,
@@ -3295,8 +3318,7 @@ namespace Nop.Services.Installation
 
             await settingService.SaveSettingAsync(new DateTimeSettings
             {
-                DefaultStoreTimeZoneId = string.Empty,
-                AllowCustomersToSetTimeZone = false
+                DefaultStoreTimeZoneId = string.Empty, AllowCustomersToSetTimeZone = false
             });
 
             await settingService.SaveSettingAsync(new BlogSettings
@@ -3377,10 +3399,7 @@ namespace Nop.Services.Installation
             var eaGeneral = _emailAccountRepository.Table.FirstOrDefault();
             if (eaGeneral == null)
                 throw new Exception("Default email account cannot be loaded");
-            await settingService.SaveSettingAsync(new EmailAccountSettings
-            {
-                DefaultEmailAccountId = eaGeneral.Id
-            });
+            await settingService.SaveSettingAsync(new EmailAccountSettings { DefaultEmailAccountId = eaGeneral.Id });
 
             await settingService.SaveSettingAsync(new WidgetSettings
             {
@@ -3440,12 +3459,10 @@ namespace Nop.Services.Installation
                 ShowOnNewsCommentPage = false,
                 ShowOnProductReviewPage = false,
                 ShowOnRegistrationPage = false,
+                ShowOnCheckoutPageForGuests = false,
             });
 
-            await settingService.SaveSettingAsync(new MessagesSettings
-            {
-                UsePopupNotifications = false
-            });
+            await settingService.SaveSettingAsync(new MessagesSettings { UsePopupNotifications = false });
 
             await settingService.SaveSettingAsync(new ProxySettings
             {
@@ -3463,6 +3480,87 @@ namespace Nop.Services.Installation
                 CompareProductsCookieExpires = 24 * 10,
                 RecentlyViewedProductsCookieExpires = 24 * 10,
                 CustomerCookieExpires = 24 * 365
+            });
+
+            await settingService.SaveSettingAsync(new RobotsTxtSettings
+            {
+                DisallowPaths = new List<string>
+                {
+                    "/admin",
+                    "/bin/",
+                    "/files/",
+                    "/files/exportimport/",
+                    "/country/getstatesbycountryid",
+                    "/install",
+                    "/setproductreviewhelpfulness",
+                    "/*?*returnUrl="
+                },
+                LocalizableDisallowPaths = new List<string>
+                {
+                    "/addproducttocart/catalog/",
+                    "/addproducttocart/details/",
+                    "/backinstocksubscriptions/manage",
+                    "/boards/forumsubscriptions",
+                    "/boards/forumwatch",
+                    "/boards/postedit",
+                    "/boards/postdelete",
+                    "/boards/postcreate",
+                    "/boards/topicedit",
+                    "/boards/topicdelete",
+                    "/boards/topiccreate",
+                    "/boards/topicmove",
+                    "/boards/topicwatch",
+                    "/cart$",
+                    "/changecurrency",
+                    "/changelanguage",
+                    "/changetaxtype",
+                    "/checkout",
+                    "/checkout/billingaddress",
+                    "/checkout/completed",
+                    "/checkout/confirm",
+                    "/checkout/shippingaddress",
+                    "/checkout/shippingmethod",
+                    "/checkout/paymentinfo",
+                    "/checkout/paymentmethod",
+                    "/clearcomparelist",
+                    "/compareproducts",
+                    "/compareproducts/add/*",
+                    "/customer/avatar",
+                    "/customer/activation",
+                    "/customer/addresses",
+                    "/customer/changepassword",
+                    "/customer/checkusernameavailability",
+                    "/customer/downloadableproducts",
+                    "/customer/info",
+                    "/customer/productreviews",
+                    "/deletepm",
+                    "/emailwishlist",
+                    "/eucookielawaccept",
+                    "/inboxupdate",
+                    "/newsletter/subscriptionactivation",
+                    "/onepagecheckout",
+                    "/order/history",
+                    "/orderdetails",
+                    "/passwordrecovery/confirm",
+                    "/poll/vote",
+                    "/privatemessages",
+                    "/recentlyviewedproducts",
+                    "/returnrequest",
+                    "/returnrequest/history",
+                    "/rewardpoints/history",
+                    "/search?",
+                    "/sendpm",
+                    "/sentupdate",
+                    "/shoppingcart/*",
+                    "/storeclosed",
+                    "/subscribenewsletter",
+                    "/topic/authenticate",
+                    "/viewpm",
+                    "/uploadfilecheckoutattribute",
+                    "/uploadfileproductattribute",
+                    "/uploadfilereturnrequest",
+                    "/wishlist"
+                }
             });
         }
 
@@ -7803,6 +7901,7 @@ namespace Nop.Services.Installation
             {
                 new Discount
                 {
+                    IsActive = true,
                     Name = "Sample discount with coupon code",
                     DiscountType = DiscountType.AssignedToSkus,
                     DiscountLimitation = DiscountLimitationType.Unlimited,
@@ -7813,6 +7912,7 @@ namespace Nop.Services.Installation
                 },
                 new Discount
                 {
+                    IsActive = true,
                     Name = "'20% order total' discount",
                     DiscountType = DiscountType.AssignedToOrderTotal,
                     DiscountLimitation = DiscountLimitationType.Unlimited,
@@ -9140,6 +9240,15 @@ namespace Nop.Services.Installation
                     Type = "Nop.Services.Directory.UpdateExchangeRateTask, Nop.Services",
                     Enabled = true,
                     LastEnabledUtc = lastEnabledUtc,
+                    StopOnError = false
+                },
+                new ScheduleTask
+                {
+                    Name = "Delete inactive customers (GDPR)",
+                    //24 hours
+                    Seconds = 86400,
+                    Type = "Nop.Services.Gdpr.DeleteInactiveCustomersTask, Nop.Services",
+                    Enabled = false,
                     StopOnError = false
                 }
             };

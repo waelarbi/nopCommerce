@@ -1,8 +1,14 @@
 ﻿@model ProductDetailsModel
+
+@using Nop.Core
+@using Nop.Core.Domain.Catalog
 @using Nop.Core.Domain.Seo
-@inject Nop.Services.Html.IHtmlFormatter htmlFormatter
-@inject Nop.Core.IWebHelper webHelper
+@using Nop.Services.Html
+
+@inject IHtmlFormatter htmlFormatter
+@inject IWebHelper webHelper
 @inject SeoSettings seoSettings
+
 @{
     Layout = "_ColumnsOne";
 
@@ -17,7 +23,7 @@
     //canonical URL
     if (seoSettings.CanonicalUrlsEnabled)
     {
-        var productUrl = Url.RouteUrl("Product", new { SeName = Model.SeName }, webHelper.GetCurrentRequestProtocol()).ToLowerInvariant();
+        var productUrl = Url.RouteUrl<Product>(new { SeName = Model.SeName }, webHelper.GetCurrentRequestProtocol()).ToLowerInvariant();
         NopHtml.AddCanonicalUrlParts(productUrl, seoSettings.QueryStringInCanonicalUrlsEnabled);
     }
 
@@ -61,8 +67,12 @@
             <div data-productid="@Model.Id">
                 <div class="product-essential">
                     @await Component.InvokeAsync(typeof(WidgetViewComponent), new { widgetZone = PublicWidgetZones.ProductDetailsEssentialTop, additionalData = Model })
-                    <!--product pictures-->
-                    @await Html.PartialAsync("_ProductDetailsPictures", Model)
+                    <div class="gallery">
+                        <!--product pictures-->
+                        @await Html.PartialAsync("_ProductDetailsPictures", Model)
+                        <!--product videos-->
+                        @await Html.PartialAsync("_ProductDetailsVideos", Model)
+                    </div>
                     <div class="overview">
                         @await Html.PartialAsync("_Discontinued", Model)
                         <div class="product-name">

@@ -27,6 +27,7 @@ using Nop.Services.Localization;
 using Nop.Services.Media;
 using Nop.Services.Messages;
 using Nop.Services.Orders;
+using Nop.Services.Security;
 using Nop.Services.Seo;
 using Nop.Services.Stores;
 using Nop.Web.Models.Common;
@@ -64,6 +65,7 @@ namespace Nop.Web.Factories
         private readonly IMultiFactorAuthenticationPluginManager _multiFactorAuthenticationPluginManager;
         private readonly INewsLetterSubscriptionService _newsLetterSubscriptionService;
         private readonly IOrderService _orderService;
+        private readonly IPermissionService _permissionService;
         private readonly IPictureService _pictureService;
         private readonly IProductService _productService;
         private readonly IReturnRequestService _returnRequestService;
@@ -106,6 +108,7 @@ namespace Nop.Web.Factories
             IMultiFactorAuthenticationPluginManager multiFactorAuthenticationPluginManager,
             INewsLetterSubscriptionService newsLetterSubscriptionService,
             IOrderService orderService,
+            IPermissionService permissionService,
             IPictureService pictureService,
             IProductService productService,
             IReturnRequestService returnRequestService,
@@ -144,6 +147,7 @@ namespace Nop.Web.Factories
             _multiFactorAuthenticationPluginManager = multiFactorAuthenticationPluginManager;
             _newsLetterSubscriptionService = newsLetterSubscriptionService;
             _orderService = orderService;
+            _permissionService = permissionService;
             _pictureService = pictureService;
             _productService = productService;
             _returnRequestService = returnRequestService;
@@ -390,11 +394,17 @@ namespace Nop.Web.Factories
             if (model == null)
                 throw new ArgumentNullException(nameof(model));
 
+            var customer = await _workContext.GetCurrentCustomerAsync();
+
             model.AllowCustomersToSetTimeZone = _dateTimeSettings.AllowCustomersToSetTimeZone;
             foreach (var tzi in _dateTimeHelper.GetSystemTimeZones())
                 model.AvailableTimeZones.Add(new SelectListItem { Text = tzi.DisplayName, Value = tzi.Id, Selected = (excludeProperties ? tzi.Id == model.TimeZoneId : tzi.Id == (await _dateTimeHelper.GetCurrentTimeZoneAsync()).Id) });
 
+            //VAT
             model.DisplayVatNumber = _taxSettings.EuVatEnabled;
+            if (_taxSettings.EuVatEnabled && _taxSettings.EuVatEnabledForGuests)
+                model.VatNumber = customer.VatNumber;
+
             //form fields
             model.FirstNameEnabled = _customerSettings.FirstNameEnabled;
             model.LastNameEnabled = _customerSettings.LastNameEnabled;
@@ -480,7 +490,7 @@ namespace Nop.Web.Factories
             }
 
             //custom customer attributes
-            var customAttributes = await PrepareCustomCustomerAttributesAsync(await _workContext.GetCurrentCustomerAsync(), overrideCustomCustomerAttributesXml);
+            var customAttributes = await PrepareCustomCustomerAttributesAsync(customer, overrideCustomCustomerAttributesXml);
             foreach (var attribute in customAttributes)
                 model.CustomerAttributes.Add(attribute);
 
@@ -721,7 +731,8 @@ namespace Nop.Web.Factories
                 });
             }
 
-            if (await _multiFactorAuthenticationPluginManager.HasActivePluginsAsync())
+            if (await _permissionService.AuthorizeAsync(StandardPermissionProvider.EnableMultiFactorAuthentication) &&
+                await _multiFactorAuthenticationPluginManager.HasActivePluginsAsync())
             {
                 model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
                 {

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
@@ -29,6 +30,8 @@ using Nop.Services.Logging;
 using Nop.Services.Media.RoxyFileman;
 using Nop.Services.Plugins;
 using Nop.Services.ScheduleTasks;
+using Nop.Services.Security;
+using Nop.Services.Seo;
 using Nop.Web.Framework.Globalization;
 using Nop.Web.Framework.Mvc.Routing;
 using WebMarkupMin.AspNetCore6;
@@ -249,6 +252,23 @@ namespace Nop.Web.Framework.Infrastructure.Extensions
                     context.Context.Response.Headers.Append(HeaderNames.CacheControl, appSettings.Get<CommonConfig>().StaticFilesCacheControl);
             }
 
+            //add handling if sitemaps 
+            application.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new PhysicalFileProvider(fileProvider.GetAbsolutePath(NopSeoDefaults.SitemapXmlDirectory)),
+                RequestPath = new PathString($"/{NopSeoDefaults.SitemapXmlDirectory}"),
+                OnPrepareResponse = context =>
+                {
+                    if (!DataSettingsManager.IsDatabaseInstalled() ||
+                        !EngineContext.Current.Resolve<SitemapXmlSettings>().SitemapXmlEnabled)
+                    {
+                        context.Context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        context.Context.Response.ContentLength = 0;
+                        context.Context.Response.Body = Stream.Null;
+                    }
+                }
+            });
+
             //common static files
             application.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = staticFileResponse });
 
@@ -297,7 +317,17 @@ namespace Nop.Web.Framework.Infrastructure.Extensions
             {
                 FileProvider = new PhysicalFileProvider(fileProvider.GetAbsolutePath(NopCommonDefaults.DbBackupsPath)),
                 RequestPath = new PathString("/db_backups"),
-                ContentTypeProvider = provider
+                ContentTypeProvider = provider,
+                OnPrepareResponse = context =>
+                {
+                    if (!DataSettingsManager.IsDatabaseInstalled() ||
+                        !EngineContext.Current.Resolve<IPermissionService>().AuthorizeAsync(StandardPermissionProvider.ManageMaintenance).Result)
+                    {
+                        context.Context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        context.Context.Response.ContentLength = 0;
+                        context.Context.Response.Body = Stream.Null;
+                    }
+                }
             });
 
             //add support for webmanifest files

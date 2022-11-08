@@ -22,7 +22,7 @@ namespace Nop.Services.Media.RoxyFileman
     /// <summary>
     /// File RoxyFileman service
     /// </summary>
-    public class FileRoxyFilemanService : BaseRoxyFilemanService, IRoxyFilemanService
+    public partial class FileRoxyFilemanService : BaseRoxyFilemanService, IRoxyFilemanService
     {
         #region Fields
 
@@ -543,7 +543,8 @@ namespace Nop.Services.Media.RoxyFileman
                 if (GetFileType(_fileProvider.GetFileExtension(files[i])) == "image")
                 {
                     await using var stream = new FileStream(physicalPath, FileMode.Open);
-                    var image = SKBitmap.DecodeBounds(stream);
+                    var skData = SKData.Create(stream);
+                    var image = SKBitmap.DecodeBounds(skData);
                     width = image.Width;
                     height = image.Height;
                 }
