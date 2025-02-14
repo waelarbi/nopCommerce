@@ -107,6 +107,11 @@ public static partial class MessageTemplateSystemNames
     public const string ORDER_COMPLETED_CUSTOMER_NOTIFICATION = "OrderCompleted.CustomerNotification";
 
     /// <summary>
+    /// Represents system name of notification store owner about completed order
+    /// </summary>
+    public const string ORDER_COMPLETED_STORE_OWNER_NOTIFICATION = "OrderCompleted.StoreOwnerNotification";
+
+    /// <summary>
     /// Represents system name of notification customer about cancelled order
     /// </summary>
     public const string ORDER_CANCELLED_CUSTOMER_NOTIFICATION = "OrderCancelled.CustomerNotification";
@@ -250,6 +255,16 @@ public static partial class MessageTemplateSystemNames
     /// Represents system name of notification store owner about below quantity of product attribute combination
     /// </summary>
     public const string QUANTITY_BELOW_ATTRIBUTE_COMBINATION_STORE_OWNER_NOTIFICATION = "QuantityBelow.AttributeCombination.StoreOwnerNotification";
+
+    /// <summary>
+    /// Represents system name of notification vendor about below quantity of product
+    /// </summary>
+    public const string QUANTITY_BELOW_VENDOR_NOTIFICATION = "QuantityBelow.VendorNotification";
+
+    /// <summary>
+    /// Represents system name of notification vendor about below quantity of product attribute combination
+    /// </summary>
+    public const string QUANTITY_BELOW_ATTRIBUTE_COMBINATION_VENDOR_NOTIFICATION = "QuantityBelow.AttributeCombination.VendorNotification";
 
     /// <summary>
     /// Represents system name of notification store owner about submitting new VAT

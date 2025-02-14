@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Globalization;
 using System.Resources;
 using FluentAssertions;
@@ -13,6 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Routing;
@@ -109,21 +111,26 @@ public partial class BaseNopTest
 
         dataProvider.CreateDatabase(null);
         dataProvider.InitializeDatabase();
+        
+        var installationService = _serviceProvider.GetService<IInstallationService>();
 
-        var languagePackInfo = (DownloadUrl: string.Empty, Progress: 0);
-
-        var cultureInfo = new CultureInfo(NopCommonDefaults.DefaultLanguageCulture);
-        var regionInfo = new RegionInfo(NopCommonDefaults.DefaultLanguageCulture);
-
-        _serviceProvider.GetService<IInstallationService>()
-            .InstallRequiredDataAsync(NopTestsDefaults.AdminEmail, NopTestsDefaults.AdminPassword, languagePackInfo, regionInfo, cultureInfo).Wait();
-        _serviceProvider.GetService<IInstallationService>().InstallSampleDataAsync(NopTestsDefaults.AdminEmail).Wait();
-
-        var provider = (IPermissionProvider)Activator.CreateInstance(typeof(StandardPermissionProvider));
-        EngineContext.Current.Resolve<IPermissionService>().InstallPermissionsAsync(provider).Wait();
+        installationService.InstallAsync(
+            new InstallationSettings
+            {
+                AdminEmail = NopTestsDefaults.AdminEmail,
+                AdminPassword = NopTestsDefaults.AdminPassword,
+                LanguagePackDownloadLink = string.Empty,
+                LanguagePackProgress = 0,
+                RegionInfo = new RegionInfo(NopCommonDefaults.DefaultLanguageCulture),
+                CultureInfo = new CultureInfo(NopCommonDefaults.DefaultLanguageCulture),
+                InstallSampleData = true
+            }).Wait();
+        
+        var permissionService = EngineContext.Current.Resolve<IPermissionService>();
+        permissionService.InsertPermissionsAsync().Wait();
     }
 
-    protected static void PropertiesShouldEqual<T1, T2>(T1 obj1, T2 obj2, params string[] filter) 
+    protected static void PropertiesShouldEqual<T1, T2>(T1 obj1, T2 obj2, params string[] filter)
     {
         var object1Properties = typeof(T1).GetProperties();
         var object2Properties = typeof(T2).GetProperties();
@@ -142,7 +149,7 @@ public partial class BaseNopTest
 
             var object1PropertyValue = object1Property.GetValue(obj1);
             var object2PropertyValue = object2Property.GetValue(obj2);
-            
+
             object1PropertyValue.Should().Be(object2PropertyValue, $"The property \"{typeof(T1).Name}.{object1Property.Name}\" of these objects is not equal");
         }
     }
@@ -172,6 +179,9 @@ public partial class BaseNopTest
         webHostEnvironment.Setup(p => p.ApplicationName).Returns("nopCommerce");
         services.AddSingleton(webHostEnvironment.Object);
 
+        var htmlHelper = new Mock<IHtmlHelper>();
+        services.AddSingleton(htmlHelper.Object);
+
         //file provider
         services.AddTransient<INopFileProvider, NopFileProvider>();
         CommonHelper.DefaultFileProvider = new NopFileProvider(webHostEnvironment.Object);
@@ -200,11 +210,12 @@ public partial class BaseNopTest
 
         var hostApplicationLifetime = new Mock<IHostApplicationLifetime>();
         services.AddSingleton(hostApplicationLifetime.Object);
-            
+
         services.AddWebEncoders();
 
         var httpContext = new DefaultHttpContext();
         httpContext.Request.Headers.Append(HeaderNames.Host, NopTestsDefaults.HostIpAddress);
+        httpContext.Session = new TestSeesion();
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();
         httpContextAccessor.Setup(p => p.HttpContext).Returns(httpContext);
@@ -235,7 +246,7 @@ public partial class BaseNopTest
 
         services.AddSingleton<ITypeFinder>(typeFinder);
         Singleton<ITypeFinder>.Instance = typeFinder;
-            
+
         //web helper
         services.AddTransient<IWebHelper, WebHelper>();
 
@@ -263,7 +274,7 @@ public partial class BaseNopTest
 
         services.AddTransient(typeof(IConcurrentCollection<>), typeof(ConcurrentTrie<>));
 
-        var memoryDistributedCache = new MemoryDistributedCache(new TestMemoryDistributedCacheoptions());
+        var memoryDistributedCache = new MemoryDistributedCache(new TestMemoryDistributedCacheOptions());
         services.AddSingleton<IDistributedCache>(memoryDistributedCache);
         services.AddScoped<MemoryDistributedCacheManager>();
         services.AddSingleton(new DistributedCacheLocker(memoryDistributedCache));
@@ -426,6 +437,7 @@ public partial class BaseNopTest
             // set accessor for the connection string
             .AddScoped<IConnectionStringAccessor>(_ => DataSettingsManager.LoadSettings())
             .AddScoped<IMigrationManager, MigrationManager>()
+            .AddScoped<Lazy<IMigrationManager>>()
             .AddSingleton<IConventionSet, NopTestConventionSet>()
             .ConfigureRunner(rb =>
                 rb.WithVersionTable(new MigrationVersionInfo()).AddSqlServer().AddMySql5().AddPostgres().AddSQLite()
@@ -437,6 +449,7 @@ public partial class BaseNopTest
         services.AddTransient<IStoreContext, WebStoreContext>();
         services.AddTransient<Lazy<IStoreContext>>();
         services.AddTransient<IWorkContext, WebWorkContext>();
+        services.AddTransient<Lazy<IWorkContext>>();
         services.AddTransient<IThemeContext, ThemeContext>();
         services.AddTransient<Lazy<ILocalizationService>>();
         services.AddTransient<INopHtmlHelper, NopHtmlHelper>();
@@ -449,12 +462,12 @@ public partial class BaseNopTest
         services.AddWebOptimizer();
 
         //common factories
-        services.AddTransient<IAclSupportedModelFactory, AclSupportedModelFactory>();
         services.AddTransient<IDiscountSupportedModelFactory, DiscountSupportedModelFactory>();
         services.AddTransient<ILocalizedModelFactory, LocalizedModelFactory>();
         services.AddTransient<IStoreMappingSupportedModelFactory, StoreMappingSupportedModelFactory>();
 
         //admin factories
+        services.AddTransient<IAclSupportedModelFactory, AclSupportedModelFactory>();
         services.AddTransient<IBaseAdminModelFactory, BaseAdminModelFactory>();
         services.AddTransient<IActivityLogModelFactory, ActivityLogModelFactory>();
         services.AddTransient<IAddressAttributeModelFactory, AddressAttributeModelFactory>();
@@ -552,25 +565,6 @@ public partial class BaseNopTest
     protected static T GetService<T>(IServiceScope scope)
     {
         return scope.ServiceProvider.GetService<T>();
-    }
-
-    public async Task TestCrud<TEntity>(TEntity baseEntity, Func<TEntity, Task> insert, TEntity updateEntity, Func<TEntity, Task> update, Func<int, Task<TEntity>> getById, Func<TEntity, TEntity, bool> equals, Func<TEntity, Task> delete) where TEntity : BaseEntity
-    {
-        baseEntity.Id = 0;
-
-        await insert(baseEntity);
-        baseEntity.Id.Should().BeGreaterThan(0);
-
-        updateEntity.Id = baseEntity.Id;
-        await update(updateEntity);
-
-        var item = await getById(baseEntity.Id);
-        item.Should().NotBeNull();
-        equals(updateEntity, item).Should().BeTrue();
-
-        await delete(baseEntity);
-        item = await getById(baseEntity.Id);
-        item.Should().BeNull();
     }
 
     public static bool SetDataProviderType(DataProviderType type)
@@ -684,7 +678,7 @@ public partial class BaseNopTest
         {
         }
 
-        // Travis doesn't support named semaphore, that's why we use implementation without it 
+        // Not all CI/CD support working with named semaphore, that's why we use implementation without it 
         public override async Task<(string Url, Picture Picture)> GetPictureUrlAsync(Picture picture,
             int targetSize = 0,
             bool showDefaultPicture = true,
@@ -805,9 +799,51 @@ public partial class BaseNopTest
         }
     }
 
-    private class TestMemoryDistributedCacheoptions : IOptions<MemoryDistributedCacheOptions>
+    private class TestMemoryDistributedCacheOptions : IOptions<MemoryDistributedCacheOptions>
     {
         public MemoryDistributedCacheOptions Value => new();
+    }
+
+    private class TestSeesion : ISession
+    {
+        private static ConcurrentDictionary<string, byte[]> _sessison = new();
+
+        public Task LoadAsync(CancellationToken cancellationToken = new())
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task CommitAsync(CancellationToken cancellationToken = new())
+        {
+            return Task.CompletedTask;
+        }
+
+        public bool TryGetValue(string key, out byte[] value)
+        {
+            return _sessison.TryGetValue(key, out value);
+        }
+
+        public void Set(string key, byte[] value)
+        {
+            if (!_sessison.ContainsKey(key))
+                _sessison.TryAdd(key, value);
+            else
+                _sessison[key] = value;
+        }
+
+        public void Remove(string key)
+        {
+            _sessison.Remove(key, out _);
+        }
+
+        public void Clear()
+        {
+            _sessison.Clear();
+        }
+
+        public bool IsAvailable => true;
+        public string Id => "nop_test_session";
+        public IEnumerable<string> Keys => _sessison.Keys;
     }
 
     #endregion

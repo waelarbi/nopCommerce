@@ -3,10 +3,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Primitives;
 using Nop.Core;
 using Nop.Core.Domain.Catalog;
+using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
+using Nop.Core.Domain.Directory;
 using Nop.Core.Domain.Discounts;
 using Nop.Core.Domain.Media;
 using Nop.Core.Domain.Orders;
+using Nop.Core.Domain.Tax;
 using Nop.Core.Domain.Vendors;
 using Nop.Core.Http;
 using Nop.Core.Infrastructure;
@@ -14,6 +17,7 @@ using Nop.Services.Catalog;
 using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Customers;
+using Nop.Services.Directory;
 using Nop.Services.Discounts;
 using Nop.Services.ExportImport;
 using Nop.Services.Localization;
@@ -39,16 +43,18 @@ public partial class ProductController : BaseAdminController
 {
     #region Fields
 
+    protected readonly AdminAreaSettings _adminAreaSettings;
+    protected readonly CustomerSettings _customerSettings;
     protected readonly IAclService _aclService;
     protected readonly IBackInStockSubscriptionService _backInStockSubscriptionService;
     protected readonly ICategoryService _categoryService;
     protected readonly ICopyProductService _copyProductService;
+    protected readonly ICurrencyService _currencyService;
     protected readonly ICustomerActivityService _customerActivityService;
     protected readonly ICustomerService _customerService;
     protected readonly IDiscountService _discountService;
     protected readonly IDownloadService _downloadService;
     protected readonly IExportManager _exportManager;
-    protected readonly IGenericAttributeService _genericAttributeService;
     protected readonly IHttpClientFactory _httpClientFactory;
     protected readonly IImportManager _importManager;
     protected readonly ILanguageService _languageService;
@@ -75,6 +81,8 @@ public partial class ProductController : BaseAdminController
     protected readonly IVideoService _videoService;
     protected readonly IWebHelper _webHelper;
     protected readonly IWorkContext _workContext;
+    protected readonly CurrencySettings _currencySettings;
+    protected readonly TaxSettings _taxSettings;
     protected readonly VendorSettings _vendorSettings;
     private static readonly char[] _separator = [','];
 
@@ -82,16 +90,18 @@ public partial class ProductController : BaseAdminController
 
     #region Ctor
 
-    public ProductController(IAclService aclService,
+    public ProductController(AdminAreaSettings adminAreaSettings,
+        CustomerSettings customerSettings,
+        IAclService aclService,
         IBackInStockSubscriptionService backInStockSubscriptionService,
         ICategoryService categoryService,
         ICopyProductService copyProductService,
+        ICurrencyService currencyService,
         ICustomerActivityService customerActivityService,
         ICustomerService customerService,
         IDiscountService discountService,
         IDownloadService downloadService,
         IExportManager exportManager,
-        IGenericAttributeService genericAttributeService,
         IHttpClientFactory httpClientFactory,
         IImportManager importManager,
         ILanguageService languageService,
@@ -118,18 +128,22 @@ public partial class ProductController : BaseAdminController
         IVideoService videoService,
         IWebHelper webHelper,
         IWorkContext workContext,
+        CurrencySettings currencySettings,
+        TaxSettings taxSettings,
         VendorSettings vendorSettings)
     {
+        _adminAreaSettings = adminAreaSettings;
+        _customerSettings = customerSettings;
         _aclService = aclService;
         _backInStockSubscriptionService = backInStockSubscriptionService;
         _categoryService = categoryService;
         _copyProductService = copyProductService;
+        _currencyService = currencyService;
         _customerActivityService = customerActivityService;
         _customerService = customerService;
         _discountService = discountService;
         _downloadService = downloadService;
         _exportManager = exportManager;
-        _genericAttributeService = genericAttributeService;
         _httpClientFactory = httpClientFactory;
         _importManager = importManager;
         _languageService = languageService;
@@ -156,6 +170,8 @@ public partial class ProductController : BaseAdminController
         _videoService = videoService;
         _webHelper = webHelper;
         _workContext = workContext;
+        _currencySettings = currencySettings;
+        _taxSettings = taxSettings;
         _vendorSettings = vendorSettings;
     }
 
@@ -206,6 +222,18 @@ public partial class ProductController : BaseAdminController
                 x => x.Name,
                 localized.Name,
                 localized.LanguageId);
+            await _localizedEntityService.SaveLocalizedValueAsync(productTag,
+                x => x.MetaKeywords,
+                localized.MetaKeywords,
+                localized.LanguageId);
+            await _localizedEntityService.SaveLocalizedValueAsync(productTag,
+                x => x.MetaDescription,
+                localized.MetaDescription,
+                localized.LanguageId);
+            await _localizedEntityService.SaveLocalizedValueAsync(productTag,
+                x => x.MetaTitle,
+                localized.MetaTitle,
+                localized.LanguageId);
 
             var seName = await _urlRecordService.ValidateSeNameAsync(productTag, string.Empty, localized.Name, false);
             await _urlRecordService.SaveSlugAsync(productTag, seName, localized.LanguageId);
@@ -244,31 +272,6 @@ public partial class ProductController : BaseAdminController
             await _pictureService.SetSeoFilenameAsync(pp.PictureId, await _pictureService.GetPictureSeNameAsync(product.Name));
     }
 
-    protected virtual async Task SaveProductAclAsync(Product product, ProductModel model)
-    {
-        product.SubjectToAcl = model.SelectedCustomerRoleIds.Any();
-        await _productService.UpdateProductAsync(product);
-
-        var existingAclRecords = await _aclService.GetAclRecordsAsync(product);
-        var allCustomerRoles = await _customerService.GetAllCustomerRolesAsync(true);
-        foreach (var customerRole in allCustomerRoles)
-        {
-            if (model.SelectedCustomerRoleIds.Contains(customerRole.Id))
-            {
-                //new role
-                if (!existingAclRecords.Any(acl => acl.CustomerRoleId == customerRole.Id))
-                    await _aclService.InsertAclRecordAsync(product, customerRole.Id);
-            }
-            else
-            {
-                //remove role
-                var aclRecordToDelete = existingAclRecords.FirstOrDefault(acl => acl.CustomerRoleId == customerRole.Id);
-                if (aclRecordToDelete != null)
-                    await _aclService.DeleteAclRecordAsync(aclRecordToDelete);
-            }
-        }
-    }
-
     protected virtual async Task SaveCategoryMappingsAsync(Product product, ProductModel model)
     {
         var existingProductCategories = await _categoryService.GetProductCategoriesByProductIdAsync(product.Id, true);
@@ -281,6 +284,13 @@ public partial class ProductController : BaseAdminController
         //add categories
         foreach (var categoryId in model.SelectedCategoryIds)
         {
+            var category = await _categoryService.GetCategoryByIdAsync(categoryId);
+            if (category is null)
+                continue;
+
+            if (!await _categoryService.CanVendorAddProductsAsync(category))
+                continue;
+
             if (_categoryService.FindProductCategory(existingProductCategories, product.Id, categoryId) == null)
             {
                 //find next display order
@@ -722,7 +732,7 @@ public partial class ProductController : BaseAdminController
 
     protected virtual async Task PingVideoUrlAsync(string videoUrl)
     {
-        var path = videoUrl.StartsWith("/")
+        var path = videoUrl.StartsWith('/')
             ? $"{_webHelper.GetStoreLocation()}{videoUrl.TrimStart('/')}"
             : videoUrl;
 
@@ -784,6 +794,87 @@ public partial class ProductController : BaseAdminController
         }
     }
 
+    protected virtual async Task<List<BulkEditData>> ParseBulkEditDataAsync()
+    {
+        var rez = new Dictionary<int, BulkEditData>();
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+
+        foreach (var item in Request.Form)
+        {
+            if (getData(item, "product-select-", out var productId))
+                setData(productId, data =>
+                {
+                    data.IsSelected = true;
+                });
+
+            if (getData(item, "name-", out productId))
+                setData(productId, data =>
+                {
+                    data.Name = item.Value;
+                });
+
+            if (getData(item, "sku-", out productId))
+                setData(productId, data =>
+                {
+                    data.Sku = item.Value;
+                });
+
+            if (getData(item, "price-", out productId))
+                setData(productId, data =>
+                {
+                    data.Price = decimal.Parse(item.Value);
+                });
+
+            if (getData(item, "old-price-", out productId))
+                setData(productId, data =>
+                {
+                    data.OldPrice = decimal.Parse(item.Value);
+                });
+
+            if (getData(item, "quantity-", out productId))
+                setData(productId, data =>
+                {
+                    data.Quantity = int.Parse(item.Value);
+                });
+
+            if (getData(item, "published-", out productId))
+                setData(productId, data =>
+                {
+                    data.IsPublished = true;
+                });
+        }
+
+        var productIds = rez.Select(p => p.Key).ToArray();
+
+        var products = await _productService.GetProductsByIdsAsync(productIds);
+
+        foreach (var product in products)
+            rez[product.Id].Product = product;
+
+        return rez.Values.ToList();
+
+        bool getData(KeyValuePair<string, StringValues> item, string selector, out int productId)
+        {
+            var key = item.Key;
+            productId = 0;
+
+            if (!key.StartsWith(selector))
+                return false;
+
+            productId = int.Parse(key.Replace(selector, string.Empty));
+
+            return true;
+        }
+
+        void setData(int productId, Action<BulkEditData> action)
+        {
+            if (!rez.ContainsKey(productId))
+                rez.Add(productId, new BulkEditData(_taxSettings.DefaultTaxCategoryId, currentVendor?.Id ?? 0));
+
+            action(rez[productId]);
+        }
+    }
+
     #endregion
 
     #region Methods
@@ -795,31 +886,87 @@ public partial class ProductController : BaseAdminController
         return RedirectToAction("List");
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> List()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _productModelFactory.PrepareProductSearchModelAsync(new ProductSearchModel());
 
         return View(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
+    public virtual async Task<IActionResult> BulkEdit()
+    {
+        //prepare model
+        var model = await _productModelFactory.PrepareProductSearchModelAsync(new ProductSearchModel());
+        model.Length = _adminAreaSettings.ProductsBulkEditGridPageSize;
+
+        return View(model);
+    }
+
+    [HttpPost, ActionName("BulkEdit"), ParameterBasedOnFormName("bulk-edit-save-selected", "selected")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    public async Task<IActionResult> BulkEditSave(ProductSearchModel searchModel, bool selected)
+    {
+        var data = await ParseBulkEditDataAsync();
+
+        var productsToUpdate = data.Where(d => d.NeedToUpdate(selected)).ToList();
+        await _productService.UpdateProductsAsync(productsToUpdate.Select(d => d.UpdateProduct(selected)).ToList());
+
+        var productsToInsert = data.Where(d => d.NeedToCreate(selected)).ToList();
+        await _productService.InsertProductsAsync(productsToInsert.Select(d => d.CreateProduct(selected)).ToList());
+
+        //prepare model
+        var model = await _productModelFactory.PrepareProductSearchModelAsync(searchModel);
+        model.Length = _adminAreaSettings.ProductsBulkEditGridPageSize;
+
+        return View(model);
+    }
+
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductList(ProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _productModelFactory.PrepareProductListModelAsync(searchModel);
 
         return Json(model);
     }
 
+    [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
+    public virtual async Task<IActionResult> BulkEditProducts(ProductSearchModel searchModel)
+    {
+        //prepare model
+        var model = await _productModelFactory.PrepareProductListModelAsync(searchModel);
+        var html = await RenderPartialViewToStringAsync("_BulkEdit.Products", model.Data.ToList());
+
+        return Json(new Dictionary<string, object> { { "Html", html }, { "Products", model } });
+    }
+
+    [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
+    public virtual async Task<IActionResult> BulkEditNewProduct(int id)
+    {
+        var primaryStoreCurrencyCode = (await _currencyService.GetCurrencyByIdAsync(_currencySettings.PrimaryStoreCurrencyId)).CurrencyCode;
+
+        //prepare model
+        var model = new List<ProductModel> { new()
+        {
+            Id = id,
+            PrimaryStoreCurrencyCode = primaryStoreCurrencyCode,
+            Published = true
+        } };
+
+        var html = await RenderPartialViewToStringAsync("_BulkEdit.Products", model);
+
+        return Json(html);
+    }
+
     [HttpPost, ActionName("List")]
     [FormValueRequired("go-to-product-by-sku")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> GoToSku(ProductSearchModel searchModel)
     {
         //try to load a product entity, if not found, then try to load a product attribute combination
@@ -833,11 +980,9 @@ public partial class ProductController : BaseAdminController
         return await List();
     }
 
-    public virtual async Task<IActionResult> Create(bool showtour = false)
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    public virtual async Task<IActionResult> Create()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //validate maximum number of products per vendor
         var currentVendor = await _workContext.GetCurrentVendorAsync();
         if (_vendorSettings.MaximumProductNumber > 0 &&
@@ -852,26 +997,13 @@ public partial class ProductController : BaseAdminController
         //prepare model
         var model = await _productModelFactory.PrepareProductModelAsync(new ProductModel(), null);
 
-        //show configuration tour
-        if (showtour)
-        {
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var hideCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.HideConfigurationStepsAttribute);
-            var closeCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.CloseConfigurationStepsAttribute);
-
-            if (!hideCard && !closeCard)
-                ViewBag.ShowTour = true;
-        }
-
         return View(model);
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> Create(ProductModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //validate maximum number of products per vendor
         var currentVendor = await _workContext.GetCurrentVendorAsync();
         if (_vendorSettings.MaximumProductNumber > 0 &&
@@ -912,9 +1044,6 @@ public partial class ProductController : BaseAdminController
             //manufacturers
             await SaveManufacturerMappingsAsync(product, model);
 
-            //ACL (customer roles)
-            await SaveProductAclAsync(product, model);
-
             //stores
             await _productService.UpdateProductStoreMappingsAsync(product, model.SelectedStoreIds);
 
@@ -950,11 +1079,9 @@ public partial class ProductController : BaseAdminController
         return View(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> Edit(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(id);
         if (product == null || product.Deleted)
@@ -972,11 +1099,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> Edit(ProductModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(model.Id);
         if (product == null || product.Deleted)
@@ -1054,9 +1179,6 @@ public partial class ProductController : BaseAdminController
 
             //manufacturers
             await SaveManufacturerMappingsAsync(product, model);
-
-            //ACL (customer roles)
-            await SaveProductAclAsync(product, model);
 
             //stores
             await _productService.UpdateProductStoreMappingsAsync(product, model.SelectedStoreIds);
@@ -1148,11 +1270,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> Delete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(id);
         if (product == null)
@@ -1175,27 +1295,33 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> DeleteSelected(ICollection<int> selectedIds)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         if (selectedIds == null || !selectedIds.Any())
             return NoContent();
 
         var currentVendor = await _workContext.GetCurrentVendorAsync();
-        await _productService.DeleteProductsAsync((await _productService.GetProductsByIdsAsync(selectedIds.ToArray()))
-            .Where(p => currentVendor == null || p.VendorId == currentVendor.Id).ToList());
+
+        var products = (await _productService.GetProductsByIdsAsync(selectedIds.ToArray()))
+            .Where(p => currentVendor == null || p.VendorId == currentVendor.Id).ToList();
+
+        await _productService.DeleteProductsAsync(products);
+
+        //activity log
+        var activityLogFormat = await _localizationService.GetResourceAsync("ActivityLog.DeleteProduct");
+
+        foreach (var product in products)
+            await _customerActivityService.InsertActivityAsync("DeleteProduct",
+                string.Format(activityLogFormat, product.Name), product);
 
         return Json(new { Result = true });
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> CopyProduct(ProductModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         var copyModel = model.CopyProductModel;
         try
         {
@@ -1246,17 +1372,27 @@ public partial class ProductController : BaseAdminController
         return Json(new { Result = message });
     }
 
+    //action displaying notification (warning) to a store owner that 'Date of Birth' is disabled
+    public virtual async Task<IActionResult> CustomersDateOfBirthDisabledWarning()
+    {
+        if (_customerSettings.DateOfBirthEnabled)
+            return Json(new { Result = string.Empty });
+
+        var warning = string.Format(await _localizationService.GetResourceAsync("Admin.Catalog.Products.Fields.AgeVerification.DateOfBirthDisabled"),
+            Url.Action("CustomerUser", "Setting"));
+
+        return Json(new { Result = warning });
+    }
+
     #endregion
 
     #region Required products
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> LoadProductFriendlyNames(string productIds)
     {
         var result = string.Empty;
-
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return Json(new { Text = result });
 
         if (string.IsNullOrWhiteSpace(productIds))
             return Json(new { Text = result });
@@ -1284,11 +1420,9 @@ public partial class ProductController : BaseAdminController
         return Json(new { Text = result });
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RequiredProductAddPopup()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddRequiredProductSearchModelAsync(new AddRequiredProductSearchModel());
 
@@ -1296,11 +1430,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RequiredProductAddPopupList(AddRequiredProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddRequiredProductListModelAsync(searchModel);
 
@@ -1312,11 +1444,9 @@ public partial class ProductController : BaseAdminController
     #region Related products
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> RelatedProductList(RelatedProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -1333,11 +1463,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RelatedProductUpdate(RelatedProductModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a related product with the specified id
         var relatedProduct = await _productService.GetRelatedProductByIdAsync(model.Id)
             ?? throw new ArgumentException("No related product found with the specified id");
@@ -1358,11 +1486,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RelatedProductDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a related product with the specified id
         var relatedProduct = await _productService.GetRelatedProductByIdAsync(id)
             ?? throw new ArgumentException("No related product found with the specified id");
@@ -1383,11 +1509,9 @@ public partial class ProductController : BaseAdminController
         return new NullJsonResult();
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RelatedProductAddPopup(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddRelatedProductSearchModelAsync(new AddRelatedProductSearchModel());
 
@@ -1395,11 +1519,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RelatedProductAddPopupList(AddRelatedProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddRelatedProductListModelAsync(searchModel);
 
@@ -1408,11 +1530,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost]
     [FormValueRequired("save")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RelatedProductAddPopup(AddRelatedProductModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         var selectedProducts = await _productService.GetProductsByIdsAsync(model.SelectedProductIds.ToArray());
         if (selectedProducts.Any())
         {
@@ -1446,11 +1566,9 @@ public partial class ProductController : BaseAdminController
     #region Cross-sell products
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> CrossSellProductList(CrossSellProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -1467,11 +1585,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> CrossSellProductDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a cross-sell product with the specified id
         var crossSellProduct = await _productService.GetCrossSellProductByIdAsync(id)
             ?? throw new ArgumentException("No cross-sell product found with the specified id");
@@ -1490,11 +1606,9 @@ public partial class ProductController : BaseAdminController
         return new NullJsonResult();
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> CrossSellProductAddPopup(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddCrossSellProductSearchModelAsync(new AddCrossSellProductSearchModel());
 
@@ -1502,11 +1616,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> CrossSellProductAddPopupList(AddCrossSellProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddCrossSellProductListModelAsync(searchModel);
 
@@ -1515,11 +1627,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost]
     [FormValueRequired("save")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> CrossSellProductAddPopup(AddCrossSellProductModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         var selectedProducts = await _productService.GetProductsByIdsAsync(model.SelectedProductIds.ToArray());
         if (selectedProducts.Any())
         {
@@ -1552,11 +1662,9 @@ public partial class ProductController : BaseAdminController
     #region Associated products
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> AssociatedProductList(AssociatedProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -1573,11 +1681,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociatedProductUpdate(AssociatedProductModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get an associated product with the specified id
         var associatedProduct = await _productService.GetProductByIdAsync(model.Id)
             ?? throw new ArgumentException("No associated product found with the specified id");
@@ -1594,11 +1700,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociatedProductDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get an associated product with the specified id
         var product = await _productService.GetProductByIdAsync(id)
             ?? throw new ArgumentException("No associated product found with the specified id");
@@ -1614,11 +1718,9 @@ public partial class ProductController : BaseAdminController
         return new NullJsonResult();
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociatedProductAddPopup(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddAssociatedProductSearchModelAsync(new AddAssociatedProductSearchModel());
 
@@ -1626,11 +1728,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociatedProductAddPopupList(AddAssociatedProductSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _productModelFactory.PrepareAddAssociatedProductListModelAsync(searchModel);
 
@@ -1639,11 +1739,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost]
     [FormValueRequired("save")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociatedProductAddPopup(AddAssociatedProductModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         var selectedProducts = await _productService.GetProductsByIdsAsync(model.SelectedProductIds.ToArray());
 
         var tryToAddSelfGroupedProduct = selectedProducts
@@ -1693,11 +1791,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost]
     [IgnoreAntiforgeryToken]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductPictureAdd(int productId, IFormCollection form)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         if (productId == 0)
             throw new ArgumentException();
 
@@ -1711,8 +1807,22 @@ public partial class ProductController : BaseAdminController
 
         //a vendor should have access only to his products
         var currentVendor = await _workContext.GetCurrentVendorAsync();
-        if (currentVendor != null && product.VendorId != currentVendor.Id)
-            return RedirectToAction("List");
+        if (currentVendor != null)
+        {
+            if (product.VendorId != currentVendor.Id)
+                return RedirectToAction("List");
+
+            var existingPictures = await _pictureService.GetPicturesByProductIdAsync(product.Id);
+            if (existingPictures.Count >= _vendorSettings.MaximumProductPicturesNumber)
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = await _localizationService.GetResourceAsync("Admin.Catalog.Products.Multimedia.Pictures.Alert.VendorNumberPicturesLimit"),
+                });
+            }
+        }
+
         try
         {
             foreach (var file in files)
@@ -1743,11 +1853,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductPictureList(ProductPictureSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -1764,11 +1872,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductPictureUpdate(ProductPictureModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product picture with the specified id
         var productPicture = await _productService.GetProductPictureByIdAsync(model.Id)
             ?? throw new ArgumentException("No product picture found with the specified id");
@@ -1800,11 +1906,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductPictureDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product picture with the specified id
         var productPicture = await _productService.GetProductPictureByIdAsync(id)
             ?? throw new ArgumentException("No product picture found with the specified id");
@@ -1835,11 +1939,9 @@ public partial class ProductController : BaseAdminController
     #region Product videos
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductVideoAdd(int productId, [Validate] ProductVideoModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         if (productId == 0)
             throw new ArgumentException();
 
@@ -1903,11 +2005,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductVideoList(ProductVideoSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -1924,11 +2024,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductVideoUpdate([Validate] ProductVideoModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product picture with the specified id
         var productVideo = await _productService.GetProductVideoByIdAsync(model.Id)
             ?? throw new ArgumentException("No product video found with the specified id");
@@ -1972,11 +2070,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductVideoDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product video with the specified id
         var productVideo = await _productService.GetProductVideoByIdAsync(id)
             ?? throw new ArgumentException("No product video found with the specified id");
@@ -2007,11 +2103,9 @@ public partial class ProductController : BaseAdminController
     #region Product specification attributes
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductSpecificationAttributeAdd(AddSpecificationAttributeModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         var product = await _productService.GetProductByIdAsync(model.ProductId);
         if (product == null)
         {
@@ -2082,11 +2176,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductSpecAttrList(ProductSpecificationAttributeSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2103,11 +2195,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductSpecAttrUpdate(AddSpecificationAttributeModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product specification attribute with the specified id
         var psa = await _specificationAttributeService.GetProductSpecificationAttributeByIdAsync(model.SpecificationId);
         if (psa == null)
@@ -2182,9 +2272,10 @@ public partial class ProductController : BaseAdminController
         return RedirectToAction("Edit", new { id = psa.ProductId });
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductSpecAttributeAddOrEdit(int productId, int? specificationId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
+        if (!specificationId.HasValue && !await _permissionService.AuthorizeAsync(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE))
             return AccessDeniedView();
 
         if (await _productService.GetProductByIdAsync(productId) == null)
@@ -2210,11 +2301,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductSpecAttrDelete(AddSpecificationAttributeModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product specification attribute with the specified id
         var psa = await _specificationAttributeService.GetProductSpecificationAttributeByIdAsync(model.SpecificationId);
         if (psa == null)
@@ -2245,11 +2334,9 @@ public partial class ProductController : BaseAdminController
 
     #region Product tags
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCT_TAGS_VIEW)]
     public virtual async Task<IActionResult> ProductTags()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProductTags))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _productModelFactory.PrepareProductTagSearchModelAsync(new ProductTagSearchModel());
 
@@ -2257,11 +2344,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCT_TAGS_VIEW)]
     public virtual async Task<IActionResult> ProductTags(ProductTagSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProductTags))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _productModelFactory.PrepareProductTagListModelAsync(searchModel);
 
@@ -2269,11 +2354,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCT_TAGS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductTagDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProductTags))
-            return AccessDeniedView();
-
         //try to get a product tag with the specified id
         var tag = await _productTagService.GetProductTagByIdAsync(id)
             ?? throw new ArgumentException("No product tag found with the specified id");
@@ -2286,11 +2369,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCT_TAGS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductTagsDelete(ICollection<int> selectedIds)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProductTags))
-            return await AccessDeniedJsonAsync();
-
         if (selectedIds == null || !selectedIds.Any())
             return NoContent();
 
@@ -2300,11 +2381,9 @@ public partial class ProductController : BaseAdminController
         return Json(new { Result = true });
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCT_TAGS_VIEW)]
     public virtual async Task<IActionResult> EditProductTag(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProductTags))
-            return AccessDeniedView();
-
         //try to get a product tag with the specified id
         var productTag = await _productTagService.GetProductTagByIdAsync(id);
         if (productTag == null)
@@ -2317,11 +2396,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCT_TAGS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> EditProductTag(ProductTagModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProductTags))
-            return AccessDeniedView();
-
         //try to get a product tag with the specified id
         var productTag = await _productTagService.GetProductTagByIdAsync(model.Id);
         if (productTag == null)
@@ -2330,6 +2407,9 @@ public partial class ProductController : BaseAdminController
         if (ModelState.IsValid)
         {
             productTag.Name = model.Name;
+            productTag.MetaDescription = model.MetaDescription;
+            productTag.MetaKeywords = model.MetaKeywords;
+            productTag.MetaTitle = model.MetaTitle;
             await _productTagService.UpdateProductTagAsync(productTag);
 
             //locales
@@ -2352,11 +2432,9 @@ public partial class ProductController : BaseAdminController
     #region Purchased with order
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> PurchasedWithOrders(ProductOrderSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2378,11 +2456,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost, ActionName("DownloadCatalogPDF")]
     [FormValueRequired("download-catalog-pdf")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_IMPORT_EXPORT)]
     public virtual async Task<IActionResult> DownloadCatalogAsPdf(ProductSearchModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //a vendor should have access only to his products
         var currentVendor = await _workContext.GetCurrentVendorAsync();
         if (currentVendor != null)
@@ -2435,11 +2511,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost, ActionName("ExportToXml")]
     [FormValueRequired("exportxml-all")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_IMPORT_EXPORT)]
     public virtual async Task<IActionResult> ExportXmlAll(ProductSearchModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //a vendor should have access only to his products
         var currentVendor = await _workContext.GetCurrentVendorAsync();
         if (currentVendor != null)
@@ -2486,11 +2560,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_IMPORT_EXPORT)]
     public virtual async Task<IActionResult> ExportXmlSelected(string selectedIds)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         var products = new List<Product>();
         if (selectedIds != null)
         {
@@ -2521,11 +2593,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost, ActionName("ExportToExcel")]
     [FormValueRequired("exportexcel-all")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_IMPORT_EXPORT)]
     public virtual async Task<IActionResult> ExportExcelAll(ProductSearchModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //a vendor should have access only to his products
         var currentVendor = await _workContext.GetCurrentVendorAsync();
         if (currentVendor != null)
@@ -2573,11 +2643,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_IMPORT_EXPORT)]
     public virtual async Task<IActionResult> ExportExcelSelected(string selectedIds)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         var products = new List<Product>();
         if (selectedIds != null)
         {
@@ -2608,11 +2676,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_IMPORT_EXPORT)]
     public virtual async Task<IActionResult> ImportExcel(IFormFile importexcelfile)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         if (await _workContext.GetCurrentVendorAsync() != null && !_vendorSettings.AllowVendorsToImportProducts)
             //a vendor can not import products
             return AccessDeniedView();
@@ -2647,11 +2713,9 @@ public partial class ProductController : BaseAdminController
     #region Tier prices
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> TierPriceList(TierPriceSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2667,11 +2731,9 @@ public partial class ProductController : BaseAdminController
         return Json(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> TierPriceCreatePopup(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(productId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2684,11 +2746,9 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost]
     [FormValueRequired("save")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> TierPriceCreatePopup(TierPriceModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(model.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2719,11 +2779,9 @@ public partial class ProductController : BaseAdminController
         return View(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> TierPriceEditPopup(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a tier price with the specified id
         var tierPrice = await _productService.GetTierPriceByIdAsync(id);
         if (tierPrice == null)
@@ -2745,11 +2803,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> TierPriceEditPopup(TierPriceModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a tier price with the specified id
         var tierPrice = await _productService.GetTierPriceByIdAsync(model.Id);
         if (tierPrice == null)
@@ -2784,11 +2840,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> TierPriceDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a tier price with the specified id
         var tierPrice = await _productService.GetTierPriceByIdAsync(id)
             ?? throw new ArgumentException("No tier price found with the specified id");
@@ -2812,11 +2866,9 @@ public partial class ProductController : BaseAdminController
     #region Product attributes
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeMappingList(ProductAttributeMappingSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2832,11 +2884,9 @@ public partial class ProductController : BaseAdminController
         return Json(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeMappingCreate(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(productId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2856,11 +2906,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeMappingCreate(ProductAttributeMappingModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(model.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -2933,11 +2981,9 @@ public partial class ProductController : BaseAdminController
         return RedirectToAction("ProductAttributeMappingEdit", new { id = productAttributeMapping.Id });
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeMappingEdit(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product attribute mapping with the specified id
         var productAttributeMapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(id)
             ?? throw new ArgumentException("No product attribute mapping found with the specified id");
@@ -2961,11 +3007,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeMappingEdit(ProductAttributeMappingModel model, bool continueEditing, IFormCollection form)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product attribute mapping with the specified id
         var productAttributeMapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(model.Id)
             ?? throw new ArgumentException("No product attribute mapping found with the specified id");
@@ -3015,11 +3059,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeMappingDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product attribute mapping with the specified id
         var productAttributeMapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(id)
             ?? throw new ArgumentException("No product attribute mapping found with the specified id");
@@ -3063,11 +3105,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeValueList(ProductAttributeValueSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product attribute mapping with the specified id
         var productAttributeMapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(searchModel.ProductAttributeMappingId)
             ?? throw new ArgumentException("No product attribute mapping found with the specified id");
@@ -3087,11 +3127,9 @@ public partial class ProductController : BaseAdminController
         return Json(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeValueCreatePopup(int productAttributeMappingId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product attribute mapping with the specified id
         var productAttributeMapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(productAttributeMappingId)
             ?? throw new ArgumentException("No product attribute mapping found with the specified id");
@@ -3112,11 +3150,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeValueCreatePopup(ProductAttributeValueModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product attribute mapping with the specified id
         var productAttributeMapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(model.ProductAttributeMappingId);
         if (productAttributeMapping == null)
@@ -3176,11 +3212,9 @@ public partial class ProductController : BaseAdminController
         return View(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeValueEditPopup(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product attribute value with the specified id
         var productAttributeValue = await _productAttributeService.GetProductAttributeValueByIdAsync(id);
         if (productAttributeValue == null)
@@ -3207,11 +3241,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeValueEditPopup(ProductAttributeValueModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product attribute value with the specified id
         var productAttributeValue = await _productAttributeService.GetProductAttributeValueByIdAsync(model.Id);
         if (productAttributeValue == null)
@@ -3276,11 +3308,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeValueDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product attribute value with the specified id
         var productAttributeValue = await _productAttributeService.GetProductAttributeValueByIdAsync(id)
             ?? throw new ArgumentException("No product attribute value found with the specified id");
@@ -3319,11 +3349,10 @@ public partial class ProductController : BaseAdminController
         return new NullJsonResult();
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociateProductToAttributeValuePopup()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _productModelFactory.PrepareAssociateProductToAttributeValueSearchModelAsync(new AssociateProductToAttributeValueSearchModel());
 
@@ -3331,11 +3360,10 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociateProductToAttributeValuePopupList(AssociateProductToAttributeValueSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _productModelFactory.PrepareAssociateProductToAttributeValueListModelAsync(searchModel);
 
@@ -3344,11 +3372,10 @@ public partial class ProductController : BaseAdminController
 
     [HttpPost]
     [FormValueRequired("save")]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociateProductToAttributeValuePopup([Bind(Prefix = nameof(AssociateProductToAttributeValueModel))] AssociateProductToAttributeValueModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var associatedProduct = await _productService.GetProductByIdAsync(model.AssociatedToProductId);
         if (associatedProduct == null)
@@ -3402,11 +3429,9 @@ public partial class ProductController : BaseAdminController
     #region Product attribute combinations
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeCombinationList(ProductAttributeCombinationSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -3423,11 +3448,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeCombinationDelete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a combination with the specified id
         var combination = await _productAttributeService.GetProductAttributeCombinationByIdAsync(id)
             ?? throw new ArgumentException("No product attribute combination found with the specified id");
@@ -3446,11 +3469,9 @@ public partial class ProductController : BaseAdminController
         return new NullJsonResult();
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeCombinationCreatePopup(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(productId);
         if (product == null)
@@ -3468,11 +3489,9 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> ProductAttributeCombinationCreatePopup(int productId, ProductAttributeCombinationModel model, IFormCollection form)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(productId);
         if (product == null)
@@ -3528,11 +3547,10 @@ public partial class ProductController : BaseAdminController
         return View(model);
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeCombinationGeneratePopup(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(productId);
         if (product == null)
@@ -3550,11 +3568,10 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeCombinationGeneratePopup(IFormCollection form, ProductAttributeCombinationModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(model.ProductId);
         if (product == null)
@@ -3592,11 +3609,10 @@ public partial class ProductController : BaseAdminController
         return View(new ProductAttributeCombinationModel());
     }
 
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeCombinationEditPopup(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a combination with the specified id
         var combination = await _productAttributeService.GetProductAttributeCombinationByIdAsync(id);
         if (combination == null)
@@ -3619,11 +3635,10 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> ProductAttributeCombinationEditPopup(ProductAttributeCombinationModel model, IFormCollection form)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //try to get a combination with the specified id
         var combination = await _productAttributeService.GetProductAttributeCombinationByIdAsync(model.Id);
         if (combination == null)
@@ -3686,11 +3701,10 @@ public partial class ProductController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> GenerateAllAttributeCombinations(int productId)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(productId)
             ?? throw new ArgumentException("No product found with the specified id");
@@ -3710,11 +3724,9 @@ public partial class ProductController : BaseAdminController
     #region Product editor settings
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SETTINGS)]
     public virtual async Task<IActionResult> SaveProductEditorSettings(ProductModel model, string returnUrl = "")
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return AccessDeniedView();
-
         //vendors cannot manage these settings
         if (await _workContext.GetCurrentVendorAsync() != null)
             return RedirectToAction("List");
@@ -3739,11 +3751,9 @@ public partial class ProductController : BaseAdminController
     #region Stock quantity history
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_VIEW)]
     public virtual async Task<IActionResult> StockQuantityHistory(StockQuantityHistorySearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageProducts))
-            return await AccessDeniedJsonAsync();
-
         var product = await _productService.GetProductByIdAsync(searchModel.ProductId)
             ?? throw new ArgumentException("No product found with the specified id");
 
@@ -3759,6 +3769,116 @@ public partial class ProductController : BaseAdminController
     }
 
     #endregion
+
+    #endregion
+
+    #region Nested class
+
+    protected class BulkEditData
+    {
+        protected bool _updated;
+        protected bool _created;
+        protected int _defaultTaxCategoryId;
+        protected int _vendorId;
+
+        public BulkEditData(int defaultTaxCategoryId, int vendorId)
+        {
+            _defaultTaxCategoryId = defaultTaxCategoryId;
+            _vendorId = vendorId;
+        }
+
+        public bool IsSelected { get; set; }
+        public string Name { get; set; }
+        public string Sku { get; set; }
+        public decimal Price { get; set; }
+        public decimal OldPrice { get; set; }
+        public int Quantity { get; set; }
+        public bool IsPublished { get; set; }
+        public Product Product { get; set; }
+
+        public bool NeedToUpdate(bool selected)
+        {
+            if (selected && !IsSelected)
+                return false;
+
+            if (Product == null)
+                return false;
+
+            if (_updated)
+                return true;
+
+            return !Product.Name.Equals(Name) ||
+                !Product.Sku.Equals(Sku) ||
+                !Product.Price.Equals(Price) ||
+                !Product.OldPrice.Equals(OldPrice) ||
+                !Product.StockQuantity.Equals(Quantity) ||
+                !Product.Published.Equals(IsPublished);
+        }
+
+        public bool NeedToCreate(bool selected)
+        {
+            if (selected && !IsSelected)
+                return false;
+
+            if (Product != null)
+                return false;
+
+            return true;
+        }
+
+        public Product UpdateProduct(bool selected)
+        {
+            if (!NeedToUpdate(selected) || _updated)
+                return Product;
+
+            Product.Name = Name;
+            Product.Sku = Sku;
+            Product.Price = Price;
+            Product.OldPrice = OldPrice;
+            Product.StockQuantity = Quantity;
+            Product.Published = IsPublished;
+
+            _updated = true;
+
+            return Product;
+        }
+
+        public Product CreateProduct(bool selected)
+        {
+            if (!NeedToCreate(selected) || _created)
+                return Product;
+
+            Product = new Product
+            {
+                Name = Name,
+                Sku = Sku,
+                Price = Price,
+                OldPrice = OldPrice,
+                StockQuantity = Quantity,
+                Published = IsPublished,
+                //set default values for the new model
+                MaximumCustomerEnteredPrice = 1000,
+                MaxNumberOfDownloads = 10,
+                RecurringCycleLength = 100,
+                RecurringTotalCycles = 10,
+                RentalPriceLength = 1,
+                NotifyAdminForQuantityBelow = 1,
+                OrderMinimumQuantity = 1,
+                OrderMaximumQuantity = 10000,
+                TaxCategoryId = _defaultTaxCategoryId,
+                UnlimitedDownloads = true,
+                IsShipEnabled = true,
+                AllowCustomerReviews = true,
+                VisibleIndividually = true,
+                ProductType = ProductType.SimpleProduct,
+                VendorId = _vendorId
+            };
+
+            _created = true;
+
+            return Product;
+        }
+    }
 
     #endregion
 }

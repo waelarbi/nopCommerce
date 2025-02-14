@@ -1,10 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Primitives;
-using Nop.Core;
-using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Payments;
 using Nop.Core.Events;
-using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Directory;
 using Nop.Services.Localization;
@@ -15,6 +12,7 @@ using Nop.Services.Security;
 using Nop.Web.Areas.Admin.Factories;
 using Nop.Web.Areas.Admin.Models.Payments;
 using Nop.Web.Framework.Mvc;
+using Nop.Web.Framework.Mvc.Filters;
 
 namespace Nop.Web.Areas.Admin.Controllers;
 
@@ -30,8 +28,6 @@ public partial class PaymentController : BaseAdminController
     protected readonly IPaymentPluginManager _paymentPluginManager;
     protected readonly IPermissionService _permissionService;
     protected readonly ISettingService _settingService;
-    protected readonly IGenericAttributeService _genericAttributeService;
-    protected readonly IWorkContext _workContext;
     protected readonly PaymentSettings _paymentSettings;
     private static readonly char[] _separator = [','];
 
@@ -47,8 +43,6 @@ public partial class PaymentController : BaseAdminController
         IPaymentPluginManager paymentPluginManager,
         IPermissionService permissionService,
         ISettingService settingService,
-        IGenericAttributeService genericAttributeService,
-        IWorkContext workContext,
         PaymentSettings paymentSettings)
     {
         _countryService = countryService;
@@ -59,8 +53,6 @@ public partial class PaymentController : BaseAdminController
         _paymentPluginManager = paymentPluginManager;
         _permissionService = permissionService;
         _settingService = settingService;
-        _genericAttributeService = genericAttributeService;
-        _workContext = workContext;
         _paymentSettings = paymentSettings;
     }
 
@@ -73,34 +65,19 @@ public partial class PaymentController : BaseAdminController
         return RedirectToAction("Methods");
     }
 
-    public virtual async Task<IActionResult> Methods(bool showtour = false)
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PAYMENT_METHODS)]
+    public virtual async Task<IActionResult> Methods()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManagePaymentMethods))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _paymentModelFactory.PreparePaymentMethodsModelAsync(new PaymentMethodsModel());
-
-        //show configuration tour
-        if (showtour)
-        {
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var hideCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.HideConfigurationStepsAttribute);
-            var closeCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.CloseConfigurationStepsAttribute);
-
-            if (!hideCard && !closeCard)
-                ViewBag.ShowTour = true;
-        }
 
         return View(model);
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PAYMENT_METHODS)]
     public virtual async Task<IActionResult> Methods(PaymentMethodSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManagePaymentMethods))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _paymentModelFactory.PreparePaymentMethodListModelAsync(searchModel);
 
@@ -108,11 +85,9 @@ public partial class PaymentController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PAYMENT_METHODS)]
     public virtual async Task<IActionResult> MethodUpdate(PaymentMethodModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManagePaymentMethods))
-            return await AccessDeniedJsonAsync();
-
         var pm = await _paymentPluginManager.LoadPluginBySystemNameAsync(model.SystemName);
         if (_paymentPluginManager.IsPluginActive(pm))
         {
@@ -146,11 +121,9 @@ public partial class PaymentController : BaseAdminController
         return new NullJsonResult();
     }
 
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PAYMENT_METHODS)]
     public virtual async Task<IActionResult> MethodRestrictions()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManagePaymentMethods))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _paymentModelFactory.PreparePaymentMethodsModelAsync(new PaymentMethodsModel());
 
@@ -162,11 +135,9 @@ public partial class PaymentController : BaseAdminController
     //we use 2048 value because in some cases default value (1024) is too small for this action
     [RequestFormLimits(ValueCountLimit = 2048)]
     [HttpPost, ActionName("MethodRestrictions")]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PAYMENT_METHODS)]
     public virtual async Task<IActionResult> MethodRestrictionsSave(PaymentMethodsModel model, IFormCollection form)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManagePaymentMethods))
-            return AccessDeniedView();
-
         var paymentMethods = await _paymentPluginManager.LoadAllPluginsAsync();
         var countries = await _countryService.GetAllCountriesAsync(showHidden: true);
 

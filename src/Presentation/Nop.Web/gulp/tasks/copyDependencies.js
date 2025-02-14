@@ -67,19 +67,13 @@ export default function copyDependencies()
 
     //OverlayScrollbars
     gulp
-      .src(`${nodeModules}overlayscrollbars/**`)
-      .pipe(filter('**/{css,js}/*.min*'))
+      .src(`${nodeModules}overlayscrollbars/**/*.min.*`)
       .pipe(gulp.dest(`${targetPath}overlayscrollbars`)),
 
     //Swiper
     gulp
       .src(nodeModules + 'swiper/swiper-bundle.min.{css,js,js.map}')
       .pipe(gulp.dest(targetPath + '/swiper')),
-
-    //Shepherd.js
-    gulp
-      .src(nodeModules + 'shepherd.js/dist/**/shepherd.{css,min.js}')
-      .pipe(gulp.dest(targetPath + '/shepherd.js')),
 
     //JsRender
     gulp
@@ -121,7 +115,7 @@ export default function copyDependencies()
 
     //Admin LTE plugins: select2
     gulp
-    .src(nodeModules + '/admin-lte/plugins/select2/**/*.{css,min.js}')
+    .src(nodeModules + 'admin-lte/plugins/select2/**/*.{css,min.js}')
     .pipe(gulp.dest(`${targetPath}admin-lte/plugins/select2`)),
 
     //Chart.js
@@ -130,6 +124,19 @@ export default function copyDependencies()
       .pipe(rename({
         suffix: '.min'
       }))
-      .pipe(gulp.dest(`${targetPath}chart.js`)),
+        .pipe(gulp.dest(`${targetPath}chart.js`)),
+
+    //jQuery Migrate
+    gulp
+      .src(nodeModules + 'jquery-migrate/dist/*.{js,js.map}')
+      .pipe(gulp.dest(`${targetPath}jquery-migrate`)),
+
+    //driver.js
+    gulp
+      .src(nodeModules + 'driver.js/dist/*.{css,iife.js}')
+      .pipe(rename({
+        suffix: '.min' //avoid minification
+      }))
+      .pipe(gulp.dest(`${targetPath}driver.js`)),
     ]);
 }

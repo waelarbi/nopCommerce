@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc.Rendering;
+﻿using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Nop.Web.Framework.Models;
 using Nop.Web.Framework.Mvc.ModelBinding;
 
@@ -95,12 +96,19 @@ public partial record TopicModel : BaseNopEntityModel, IAclSupportedModel, ILoca
     public IList<SelectListItem> AvailableStores { get; set; }
 
     //ACL (customer roles)
-    [NopResourceDisplayName("Admin.ContentManagement.Topics.Fields.AclCustomerRoles")]
     public IList<int> SelectedCustomerRoleIds { get; set; }
 
     public IList<SelectListItem> AvailableCustomerRoles { get; set; }
 
     public string TopicName { get; set; }
+
+    [NopResourceDisplayName("Admin.ContentManagement.Topics.Fields.AvailableStartDateTime")]
+    [UIHint("DateTimeNullable")]
+    public DateTime? AvailableStartDateTimeUtc { get; set; }
+
+    [NopResourceDisplayName("Admin.ContentManagement.Topics.Fields.AvailableEndDateTime")]
+    [UIHint("DateTimeNullable")]
+    public DateTime? AvailableEndDateTimeUtc { get; set; }
 
     #endregion
 }

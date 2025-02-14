@@ -12,6 +12,7 @@ using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Security;
 using Nop.Core.Domain.Seo;
 using Nop.Core.Domain.Stores;
+using Nop.Core.Domain.Topics;
 using Nop.Data.Mapping;
 
 namespace Nop.Data.Migrations.Installation;
@@ -90,7 +91,7 @@ public class Indexes : ForwardOnlyMigration
             .OnColumn(nameof(ProductTag.Name)).Ascending()
             .WithOptions().NonClustered();
 
-        Create.Index("IX_Product_Name").OnTable(nameof (Product))
+        Create.Index("IX_Product_Name").OnTable(nameof(Product))
             .OnColumn(nameof(Product.Name)).Ascending()
             .WithOptions().NonClustered();
 
@@ -305,6 +306,17 @@ public class Indexes : ForwardOnlyMigration
         Create.Index("IX_Customer_Deleted")
             .OnTable(nameof(Customer))
             .OnColumn(nameof(Customer.Deleted)).Ascending()
+            .WithOptions().NonClustered();
+
+        Create.Index("IX_Topic_SystemName")
+            .OnTable(nameof(Topic))
+            .OnColumn(nameof(Topic.SystemName)).Ascending()
+            .WithOptions().NonClustered();
+
+        Create.Index("IX_Topic_Availability")
+            .OnTable(nameof(Topic))
+            .OnColumn(nameof(Topic.AvailableEndDateTimeUtc)).Descending()
+            .OnColumn(nameof(Topic.AvailableStartDateTimeUtc)).Descending()
             .WithOptions().NonClustered();
     }
 

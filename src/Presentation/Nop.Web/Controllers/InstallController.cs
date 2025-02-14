@@ -63,7 +63,7 @@ public partial class InstallController : Controller
 
     #endregion
 
-    #region Utilites
+    #region Utilities
 
     protected virtual InstallModel PrepareCountryList(InstallModel model)
     {
@@ -278,12 +278,18 @@ public partial class InstallController : Controller
                 await _uploadService.Value.UploadLocalePatternAsync(cultureInfo);
             }
 
-            //now resolve installation service
-            await _installationService.Value.InstallRequiredDataAsync(model.AdminEmail, model.AdminPassword, languagePackInfo, regionInfo, cultureInfo);
-
-            if (model.InstallSampleData)
-                await _installationService.Value.InstallSampleDataAsync(model.AdminEmail);
-
+            //now resolve installation service and install nopCommerce
+            await _installationService.Value.InstallAsync(new InstallationSettings
+            {
+               AdminEmail = model.AdminEmail,
+               AdminPassword = model.AdminPassword,
+               LanguagePackDownloadLink = languagePackInfo.DownloadUrl,
+               LanguagePackProgress = languagePackInfo.Progress,
+               RegionInfo = regionInfo,
+               CultureInfo = cultureInfo,
+               InstallSampleData = model.InstallSampleData
+            });
+            
             //prepare plugins to install
             _pluginService.Value.ClearInstalledPluginsList();
 
@@ -303,15 +309,7 @@ public partial class InstallController : Controller
             {
                 await _pluginService.Value.PreparePluginToInstallAsync(plugin.SystemName, checkDependencies: false);
             }
-
-            //register default permissions
-            var permissionProviders = new List<Type> { typeof(StandardPermissionProvider) };
-            foreach (var providerType in permissionProviders)
-            {
-                var provider = (IPermissionProvider)Activator.CreateInstance(providerType);
-                await _permissionService.Value.InstallPermissionsAsync(provider);
-            }
-
+            
             return View(new InstallModel { RestartUrl = Url.RouteUrl("Homepage") });
 
         }

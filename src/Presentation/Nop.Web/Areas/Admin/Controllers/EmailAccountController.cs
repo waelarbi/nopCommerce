@@ -5,10 +5,8 @@ using Google.Apis.Auth.OAuth2.Web;
 using Google.Apis.Util.Store;
 using Microsoft.AspNetCore.Mvc;
 using Nop.Core;
-using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Messages;
 using Nop.Core.Infrastructure;
-using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
@@ -33,7 +31,6 @@ public partial class EmailAccountController : BaseAdminController
     protected readonly IEmailAccountModelFactory _emailAccountModelFactory;
     protected readonly IEmailAccountService _emailAccountService;
     protected readonly IEmailSender _emailSender;
-    protected readonly IGenericAttributeService _genericAttributeService;
     protected readonly ILocalizationService _localizationService;
     protected readonly INopFileProvider _fileProvider;
     protected readonly INotificationService _notificationService;
@@ -41,7 +38,6 @@ public partial class EmailAccountController : BaseAdminController
     protected readonly ISettingService _settingService;
     protected readonly IStoreContext _storeContext;
     protected readonly IWebHelper _webHelper;
-    protected readonly IWorkContext _workContext;
 
     #endregion
 
@@ -52,22 +48,19 @@ public partial class EmailAccountController : BaseAdminController
         IEmailAccountModelFactory emailAccountModelFactory,
         IEmailAccountService emailAccountService,
         IEmailSender emailSender,
-        IGenericAttributeService genericAttributeService,
         ILocalizationService localizationService,
         INopFileProvider fileProvider,
         INotificationService notificationService,
         IPermissionService permissionService,
         ISettingService settingService,
         IStoreContext storeContext,
-        IWebHelper webHelper,
-        IWorkContext workContext)
+        IWebHelper webHelper)
     {
         _emailAccountSettings = emailAccountSettings;
         _customerActivityService = customerActivityService;
         _emailAccountModelFactory = emailAccountModelFactory;
         _emailAccountService = emailAccountService;
         _emailSender = emailSender;
-        _genericAttributeService = genericAttributeService;
         _localizationService = localizationService;
         _fileProvider = fileProvider;
         _notificationService = notificationService;
@@ -75,7 +68,6 @@ public partial class EmailAccountController : BaseAdminController
         _settingService = settingService;
         _storeContext = storeContext;
         _webHelper = webHelper;
-        _workContext = workContext;
     }
 
     #endregion
@@ -116,45 +108,28 @@ public partial class EmailAccountController : BaseAdminController
 
     #region Methods
 
-    public virtual async Task<IActionResult> List(bool showtour = false)
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
+    public virtual async Task<IActionResult> List()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _emailAccountModelFactory.PrepareEmailAccountSearchModelAsync(new EmailAccountSearchModel());
-
-        //show configuration tour
-        if (showtour)
-        {
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var hideCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.HideConfigurationStepsAttribute);
-            var closeCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.CloseConfigurationStepsAttribute);
-
-            if (!hideCard && !closeCard)
-                ViewBag.ShowTour = true;
-        }
 
         return View(model);
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> List(EmailAccountSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _emailAccountModelFactory.PrepareEmailAccountListModelAsync(searchModel);
 
         return Json(model);
     }
 
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> MarkAsDefaultEmail(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         var defaultEmailAccount = await _emailAccountService.GetEmailAccountByIdAsync(id);
         if (defaultEmailAccount == null)
             return RedirectToAction("List");
@@ -165,11 +140,9 @@ public partial class EmailAccountController : BaseAdminController
         return RedirectToAction("List");
     }
 
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> Create()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _emailAccountModelFactory.PrepareEmailAccountModelAsync(new EmailAccountModel(), null);
 
@@ -177,11 +150,9 @@ public partial class EmailAccountController : BaseAdminController
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> Create(EmailAccountModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         if (ModelState.IsValid)
         {
             var emailAccount = model.ToEntity<EmailAccount>();
@@ -206,11 +177,9 @@ public partial class EmailAccountController : BaseAdminController
         return View(model);
     }
 
-    public virtual async Task<IActionResult> Edit(int id, bool showtour = false)
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
+    public virtual async Task<IActionResult> Edit(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //try to get an email account with the specified id
         var emailAccount = await _emailAccountService.GetEmailAccountByIdAsync(id);
         if (emailAccount == null)
@@ -222,27 +191,14 @@ public partial class EmailAccountController : BaseAdminController
         if (emailAccount.EmailAuthenticationMethod == EmailAuthenticationMethod.GmailOAuth2)
             model.AuthUrl = await PrepareOAuthUrlAsync(emailAccount);
 
-        //show configuration tour
-        if (showtour)
-        {
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var hideCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.HideConfigurationStepsAttribute);
-            var closeCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.CloseConfigurationStepsAttribute);
-
-            if (!hideCard && !closeCard)
-                ViewBag.ShowTour = true;
-        }
-
         return View(model);
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
     [FormValueRequired("save", "save-continue")]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> Edit(EmailAccountModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //try to get an email account with the specified id
         var emailAccount = await _emailAccountService.GetEmailAccountByIdAsync(model.Id);
         if (emailAccount == null)
@@ -274,11 +230,9 @@ public partial class EmailAccountController : BaseAdminController
 
     [HttpPost, ActionName("Edit")]
     [FormValueRequired("changesecret")]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> ChangeSecret(EmailAccountModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //try to get an email account with the specified id
         var emailAccount = await _emailAccountService.GetEmailAccountByIdAsync(model.Id);
         if (emailAccount == null)
@@ -295,11 +249,9 @@ public partial class EmailAccountController : BaseAdminController
 
     [HttpPost, ActionName("Edit")]
     [FormValueRequired("changepassword")]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> ChangePassword(EmailAccountModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //try to get an email account with the specified id
         var emailAccount = await _emailAccountService.GetEmailAccountByIdAsync(model.Id);
         if (emailAccount == null)
@@ -316,11 +268,9 @@ public partial class EmailAccountController : BaseAdminController
 
     [HttpPost, ActionName("Edit")]
     [FormValueRequired("sendtestemail")]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> SendTestEmail(EmailAccountModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //try to get an email account with the specified id
         var emailAccount = await _emailAccountService.GetEmailAccountByIdAsync(model.Id);
         if (emailAccount == null)
@@ -358,11 +308,9 @@ public partial class EmailAccountController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_EMAIL_ACCOUNTS)]
     public virtual async Task<IActionResult> Delete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageEmailAccounts))
-            return AccessDeniedView();
-
         //try to get an email account with the specified id
         var emailAccount = await _emailAccountService.GetEmailAccountByIdAsync(id);
         if (emailAccount == null)

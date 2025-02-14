@@ -1,5 +1,7 @@
 ﻿using System.Globalization;
+using Microsoft.AspNetCore.Http;
 using Nop.Core;
+using Nop.Core.Caching;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
@@ -13,6 +15,7 @@ using Nop.Core.Domain.Shipping;
 using Nop.Core.Domain.Tax;
 using Nop.Core.Domain.Vendors;
 using Nop.Core.Events;
+using Nop.Core.Http.Extensions;
 using Nop.Services.Affiliates;
 using Nop.Services.Catalog;
 using Nop.Services.Common;
@@ -52,6 +55,7 @@ public partial class OrderProcessingService : IOrderProcessingService
     protected readonly IEventPublisher _eventPublisher;
     protected readonly IGenericAttributeService _genericAttributeService;
     protected readonly IGiftCardService _giftCardService;
+    protected readonly IHttpContextAccessor _httpContextAccessor;
     protected readonly ILanguageService _languageService;
     protected readonly ILocalizationService _localizationService;
     protected readonly ILogger _logger;
@@ -71,6 +75,7 @@ public partial class OrderProcessingService : IOrderProcessingService
     protected readonly IShippingService _shippingService;
     protected readonly IShoppingCartService _shoppingCartService;
     protected readonly IStateProvinceService _stateProvinceService;
+    protected readonly IStaticCacheManager _staticCacheManager;
     protected readonly IStoreMappingService _storeMappingService;
     protected readonly IStoreService _storeService;
     protected readonly ITaxService _taxService;
@@ -103,6 +108,7 @@ public partial class OrderProcessingService : IOrderProcessingService
         IEventPublisher eventPublisher,
         IGenericAttributeService genericAttributeService,
         IGiftCardService giftCardService,
+        IHttpContextAccessor httpContextAccessor,
         ILanguageService languageService,
         ILocalizationService localizationService,
         ILogger logger,
@@ -122,6 +128,7 @@ public partial class OrderProcessingService : IOrderProcessingService
         IShippingService shippingService,
         IShoppingCartService shoppingCartService,
         IStateProvinceService stateProvinceService,
+        IStaticCacheManager staticCacheManager,
         IStoreMappingService storeMappingService,
         IStoreService storeService,
         ITaxService taxService,
@@ -150,6 +157,7 @@ public partial class OrderProcessingService : IOrderProcessingService
         _eventPublisher = eventPublisher;
         _genericAttributeService = genericAttributeService;
         _giftCardService = giftCardService;
+        _httpContextAccessor = httpContextAccessor;
         _languageService = languageService;
         _localizationService = localizationService;
         _logger = logger;
@@ -169,6 +177,7 @@ public partial class OrderProcessingService : IOrderProcessingService
         _shippingService = shippingService;
         _shoppingCartService = shoppingCartService;
         _stateProvinceService = stateProvinceService;
+        _staticCacheManager = staticCacheManager;
         _storeMappingService = storeMappingService;
         _storeService = storeService;
         _taxService = taxService;
@@ -1026,7 +1035,7 @@ public partial class OrderProcessingService : IOrderProcessingService
             os == OrderStatus.Complete
             && notifyCustomer)
         {
-            //notification
+            //notify customer
             var orderCompletedAttachmentFilePath = _orderSettings.AttachPdfInvoiceToOrderCompletedEmail ?
                 await _pdfService.SaveOrderPdfToDiskAsync(order) : null;
             var orderCompletedAttachmentFileName = _orderSettings.AttachPdfInvoiceToOrderCompletedEmail ?
@@ -1036,6 +1045,9 @@ public partial class OrderProcessingService : IOrderProcessingService
                     orderCompletedAttachmentFileName);
             if (orderCompletedCustomerNotificationQueuedEmailIds.Any())
                 await AddOrderNoteAsync(order, $"\"Order completed\" email (to customer) has been queued. Queued email identifiers: {string.Join(", ", orderCompletedCustomerNotificationQueuedEmailIds)}.");
+
+            //notify store owner
+            await _workflowMessageService.SendOrderCompletedStoreOwnerNotificationAsync(order, _localizationSettings.DefaultAdminLanguageId);
         }
 
         if (prevOrderStatus != OrderStatus.Cancelled &&
@@ -1528,71 +1540,121 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(processPaymentRequest);
 
-        var result = new PlaceOrderResult();
+        if (processPaymentRequest.OrderGuid == Guid.Empty)
+            throw new Exception("Order GUID is not generated");
+
+        //prepare order details
+        var details = await PreparePlaceOrderDetailsAsync(processPaymentRequest);
+
+        async Task<PlaceOrderResult> placeOrder(PlaceOrderContainer placeOrderContainer)
+        {
+            var result = new PlaceOrderResult();
+
+            try
+            {
+                var processPaymentResult =
+                    await GetProcessPaymentResultAsync(processPaymentRequest, placeOrderContainer)
+                    ?? throw new NopException("processPaymentResult is not available");
+
+                if (processPaymentResult.Success)
+                {
+                    var order = await SaveOrderDetailsAsync(processPaymentRequest, processPaymentResult,
+                        placeOrderContainer);
+                    result.PlacedOrder = order;
+
+                    //move shopping cart items to order items
+                    await MoveShoppingCartItemsToOrderItemsAsync(placeOrderContainer, order);
+
+                    //discount usage history
+                    await SaveDiscountUsageHistoryAsync(placeOrderContainer, order);
+
+                    //gift card usage history
+                    await SaveGiftCardUsageHistoryAsync(placeOrderContainer, order);
+
+                    //recurring orders
+                    if (placeOrderContainer.IsRecurringShoppingCart)
+                        await CreateFirstRecurringPaymentAsync(processPaymentRequest, order);
+
+                    //notifications
+                    await SendNotificationsAndSaveNotesAsync(order);
+
+                    //reset checkout data
+                    await _customerService.ResetCheckoutDataAsync(placeOrderContainer.Customer,
+                        processPaymentRequest.StoreId, clearCouponCodes: true, clearCheckoutAttributes: true);
+                    await _customerActivityService.InsertActivityAsync("PublicStore.PlaceOrder",
+                        string.Format(await _localizationService.GetResourceAsync("ActivityLog.PublicStore.PlaceOrder"),
+                            order.Id), order);
+
+                    //raise event       
+                    await _eventPublisher.PublishAsync(new OrderPlacedEvent(order));
+
+                    //check order status
+                    await CheckOrderStatusAsync(order);
+
+                    if (order.PaymentStatus == PaymentStatus.Paid)
+                        await ProcessOrderPaidAsync(order);
+                }
+                else
+                    foreach (var paymentError in processPaymentResult.Errors)
+                        result.AddError(string.Format(
+                            await _localizationService.GetResourceAsync("Checkout.PaymentError"), paymentError));
+            }
+            catch (Exception exc)
+            {
+                await _logger.ErrorAsync(exc.Message, exc);
+                result.AddError(exc.Message);
+            }
+
+            if (result.Success)
+                return result;
+
+            //log errors
+            var logError = result.Errors.Aggregate("Error while placing order. ",
+                (current, next) => $"{current}Error {result.Errors.IndexOf(next) + 1}: {next}. ");
+            var customer = await _customerService.GetCustomerByIdAsync(processPaymentRequest.CustomerId);
+            await _logger.ErrorAsync(logError, customer: customer);
+
+            return result;
+        }
+
+        if (!_orderSettings.PlaceOrderWithLock)
+            return await placeOrder(details);
+
+        PlaceOrderResult result;
+        var resource = details.Customer.Id.ToString();
+
+        //the named mutex helps to avoid creating the same order in different threads,
+        //and does not decrease performance significantly, because the code is blocked only for the specific cart.
+        //you should be very careful, mutexes cannot be used in with the await operation
+        //we can't use semaphore here, because it produces PlatformNotSupportedException exception on UNIX based systems
+        using var mutex = new Mutex(false, resource);
+
+        mutex.WaitOne();
+
         try
         {
-            if (processPaymentRequest.OrderGuid == Guid.Empty)
-                throw new Exception("Order GUID is not generated");
+            var cacheKey = _staticCacheManager.PrepareKey(NopOrderDefaults.OrderWithLockCacheKey, resource);
+            cacheKey.CacheTime = _orderSettings.MinimumOrderPlacementInterval;
 
-            //prepare order details
-            var details = await PreparePlaceOrderDetailsAsync(processPaymentRequest);
+            var exist = _staticCacheManager.Get(cacheKey, () => false);
 
-            var processPaymentResult = await GetProcessPaymentResultAsync(processPaymentRequest, details)
-                                       ?? throw new NopException("processPaymentResult is not available");
-
-            if (processPaymentResult.Success)
+            if (exist)
             {
-                var order = await SaveOrderDetailsAsync(processPaymentRequest, processPaymentResult, details);
-                result.PlacedOrder = order;
-
-                //move shopping cart items to order items
-                await MoveShoppingCartItemsToOrderItemsAsync(details, order);
-
-                //discount usage history
-                await SaveDiscountUsageHistoryAsync(details, order);
-
-                //gift card usage history
-                await SaveGiftCardUsageHistoryAsync(details, order);
-
-                //recurring orders
-                if (details.IsRecurringShoppingCart)
-                    await CreateFirstRecurringPaymentAsync(processPaymentRequest, order);
-
-                //notifications
-                await SendNotificationsAndSaveNotesAsync(order);
-
-                //reset checkout data
-                await _customerService.ResetCheckoutDataAsync(details.Customer, processPaymentRequest.StoreId, clearCouponCodes: true, clearCheckoutAttributes: true);
-                await _customerActivityService.InsertActivityAsync("PublicStore.PlaceOrder",
-                    string.Format(await _localizationService.GetResourceAsync("ActivityLog.PublicStore.PlaceOrder"), order.Id), order);
-
-                //raise event       
-                await _eventPublisher.PublishAsync(new OrderPlacedEvent(order));
-
-                //check order status
-                await CheckOrderStatusAsync(order);
-
-                if (order.PaymentStatus == PaymentStatus.Paid)
-                    await ProcessOrderPaidAsync(order);
+                result = new PlaceOrderResult();
+                result.Errors.Add(_localizationService.GetResourceAsync("Checkout.MinOrderPlacementInterval").Result);
             }
             else
-                foreach (var paymentError in processPaymentResult.Errors)
-                    result.AddError(string.Format(await _localizationService.GetResourceAsync("Checkout.PaymentError"), paymentError));
+            {
+                result = placeOrder(details).Result;
+
+                if (result.Success)
+                    _staticCacheManager.SetAsync(cacheKey, true).Wait();
+            }
         }
-        catch (Exception exc)
+        finally
         {
-            await _logger.ErrorAsync(exc.Message, exc);
-            result.AddError(exc.Message);
+            mutex.ReleaseMutex();
         }
-
-        if (result.Success)
-            return result;
-
-        //log errors
-        var logError = result.Errors.Aggregate("Error while placing order. ",
-            (current, next) => $"{current}Error {result.Errors.IndexOf(next) + 1}: {next}. ");
-        var customer = await _customerService.GetCustomerByIdAsync(processPaymentRequest.CustomerId);
-        await _logger.ErrorAsync(logError, customer: customer);
 
         return result;
     }
@@ -2999,7 +3061,8 @@ public partial class OrderProcessingService : IOrderProcessingService
 
             warnings.AddRange(await _shoppingCartService.AddToCartAsync(customer, product,
                 ShoppingCartType.ShoppingCart, order.StoreId,
-                orderItem.AttributesXml, orderItem.UnitPriceExclTax,
+                orderItem.AttributesXml,
+                _taxSettings.PricesIncludeTax ? orderItem.UnitPriceInclTax : orderItem.UnitPriceExclTax,
                 orderItem.RentalStartDateUtc, orderItem.RentalEndDateUtc,
                 orderItem.Quantity, false));
         }
@@ -3174,6 +3237,38 @@ public partial class OrderProcessingService : IOrderProcessingService
             result = 0;
 
         return result;
+    }
+
+    /// <summary>
+    /// Generate an order GUID
+    /// </summary>
+    /// <param name="processPaymentRequest">Process payment request</param>
+    public virtual async Task GenerateOrderGuidAsync(ProcessPaymentRequest processPaymentRequest)
+    {
+        if (processPaymentRequest == null)
+            return;
+
+        //we should use the same GUID for multiple payment attempts
+        //this way a payment gateway can prevent security issues such as credit card brute-force attacks
+        //in order to avoid any possible limitations by payment gateway we reset GUID periodically
+        var previousPaymentRequest = await _httpContextAccessor.HttpContext.Session.GetAsync<ProcessPaymentRequest>("OrderPaymentInfo");
+        if (_paymentSettings.RegenerateOrderGuidInterval > 0 &&
+            previousPaymentRequest != null &&
+            previousPaymentRequest.OrderGuidGeneratedOnUtc.HasValue)
+        {
+            var interval = DateTime.UtcNow - previousPaymentRequest.OrderGuidGeneratedOnUtc.Value;
+            if (interval.TotalSeconds < _paymentSettings.RegenerateOrderGuidInterval)
+            {
+                processPaymentRequest.OrderGuid = previousPaymentRequest.OrderGuid;
+                processPaymentRequest.OrderGuidGeneratedOnUtc = previousPaymentRequest.OrderGuidGeneratedOnUtc;
+            }
+        }
+
+        if (processPaymentRequest.OrderGuid == Guid.Empty)
+        {
+            processPaymentRequest.OrderGuid = Guid.NewGuid();
+            processPaymentRequest.OrderGuidGeneratedOnUtc = DateTime.UtcNow;
+        }
     }
 
     #endregion

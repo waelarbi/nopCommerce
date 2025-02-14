@@ -34,7 +34,7 @@ using Nop.Web.Framework.Globalization;
 using Nop.Web.Framework.Mvc.Routing;
 using Nop.Web.Framework.WebOptimizer;
 using QuestPDF.Drawing;
-using WebMarkupMin.AspNetCore8;
+using WebMarkupMin.AspNetCoreLatest;
 using WebOptimizer;
 using IPNetwork = Microsoft.AspNetCore.HttpOverrides.IPNetwork;
 
@@ -68,6 +68,10 @@ public static class ApplicationBuilderExtensions
             var pluginService = engine.Resolve<IPluginService>();
             await pluginService.InstallPluginsAsync();
             await pluginService.UpdatePluginsAsync();
+
+            //insert new ACL permission if exists
+            var permissionService = engine.Resolve<IPermissionService>();
+            await permissionService.InsertPermissionsAsync();
 
             //update nopCommerce core and db
             var migrationManager = engine.Resolve<IMigrationManager>();
@@ -233,12 +237,12 @@ public static class ApplicationBuilderExtensions
         [
             new FileProviderOptions
             {
-                RequestPath =  new PathString("/Plugins"),
+                RequestPath = new PathString("/Plugins"),
                 FileProvider = new PhysicalFileProvider(fileProvider.MapPath(@"Plugins"))
             },
             new FileProviderOptions
             {
-                RequestPath =  new PathString("/Themes"),
+                RequestPath = new PathString("/Themes"),
                 FileProvider = new PhysicalFileProvider(fileProvider.MapPath(@"Themes"))
             }
         ]);
@@ -282,37 +286,18 @@ public static class ApplicationBuilderExtensions
         //themes static files
         application.UseStaticFiles(new StaticFileOptions
         {
-            FileProvider = new PhysicalFileProvider(fileProvider.MapPath(@"Themes")),
+            FileProvider = new PhysicalFileProvider(fileProvider.MapPath("Themes")),
             RequestPath = new PathString("/Themes"),
             OnPrepareResponse = staticFileResponse
         });
 
         //plugins static files
-        var staticFileOptions = new StaticFileOptions
+        application.UseStaticFiles(new StaticFileOptions
         {
-            FileProvider = new PhysicalFileProvider(fileProvider.MapPath(@"Plugins")),
+            FileProvider = new PhysicalFileProvider(fileProvider.MapPath("Plugins")),
             RequestPath = new PathString("/Plugins"),
             OnPrepareResponse = staticFileResponse
-        };
-
-        //exclude files in blacklist
-        if (!string.IsNullOrEmpty(appSettings.Get<CommonConfig>().PluginStaticFileExtensionsBlacklist))
-        {
-            var fileExtensionContentTypeProvider = new FileExtensionContentTypeProvider();
-
-            foreach (var ext in appSettings.Get<CommonConfig>().PluginStaticFileExtensionsBlacklist
-                         .Split(';', ',')
-                         .Select(e => e.Trim().ToLowerInvariant())
-                         .Select(e => $"{(e.StartsWith(".") ? string.Empty : ".")}{e}")
-                         .Where(fileExtensionContentTypeProvider.Mappings.ContainsKey))
-            {
-                fileExtensionContentTypeProvider.Mappings.Remove(ext);
-            }
-
-            staticFileOptions.ContentTypeProvider = fileExtensionContentTypeProvider;
-        }
-
-        application.UseStaticFiles(staticFileOptions);
+        });
 
         //add support for backups
         var provider = new FileExtensionContentTypeProvider
@@ -328,7 +313,7 @@ public static class ApplicationBuilderExtensions
             OnPrepareResponse = context =>
             {
                 if (!DataSettingsManager.IsDatabaseInstalled() ||
-                    !EngineContext.Current.Resolve<IPermissionService>().AuthorizeAsync(StandardPermissionProvider.ManageMaintenance).Result)
+                    !EngineContext.Current.Resolve<IPermissionService>().AuthorizeAsync(StandardPermission.System.MANAGE_MAINTENANCE).Result)
                 {
                     context.Context.Response.StatusCode = StatusCodes.Status404NotFound;
                     context.Context.Response.ContentLength = 0;
@@ -445,19 +430,17 @@ public static class ApplicationBuilderExtensions
             options.ApplyCurrentCultureToResponseHeaders = true;
 
             //configure culture providers
+            var headerRequestCultureProvider = options.RequestCultureProviders.OfType<AcceptLanguageHeaderRequestCultureProvider>().FirstOrDefault();
+            if (headerRequestCultureProvider is not null)
+                options.RequestCultureProviders.Remove(headerRequestCultureProvider);
+
             options.AddInitialRequestCultureProvider(new NopSeoUrlCultureProvider());
             var cookieRequestCultureProvider = options.RequestCultureProviders.OfType<CookieRequestCultureProvider>().FirstOrDefault();
             if (cookieRequestCultureProvider is not null)
                 cookieRequestCultureProvider.CookieName = $"{NopCookieDefaults.Prefix}{NopCookieDefaults.CultureCookie}";
-            if (!localizationSettings.AutomaticallyDetectLanguage)
-            {
-                var headerRequestCultureProvider = options
-                    .RequestCultureProviders
-                    .OfType<AcceptLanguageHeaderRequestCultureProvider>()
-                    .FirstOrDefault();
-                if (headerRequestCultureProvider is not null)
-                    options.RequestCultureProviders.Remove(headerRequestCultureProvider);
-            }
+
+            if (localizationSettings.AutomaticallyDetectLanguage)
+                options.RequestCultureProviders.Add(new NopAcceptLanguageHeaderRequestCultureProvider());
         });
     }
 

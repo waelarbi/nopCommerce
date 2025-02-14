@@ -10,18 +10,17 @@ namespace Nop.Services.ExportImport.Help;
 /// Class for working with PropertyByName object list
 /// </summary>
 /// <typeparam name="T">Object type</typeparam>
-/// <typeparam name="L">Language</typeparam>
-public partial class PropertyManager<T, L> where L : Language
+public partial class PropertyManager<T>
 {
     /// <summary>
     /// Default properties
     /// </summary>
-    protected readonly Dictionary<string, PropertyByName<T, L>> _defaultProperties;
+    protected readonly Dictionary<string, PropertyByName<T>> _defaultProperties;
 
     /// <summary>
     /// Localized properties
     /// </summary>
-    protected readonly Dictionary<string, PropertyByName<T, L>> _localizedProperties;
+    protected readonly Dictionary<string, PropertyByName<T>> _localizedProperties;
 
     /// <summary>
     /// Catalog settings
@@ -31,7 +30,7 @@ public partial class PropertyManager<T, L> where L : Language
     /// <summary>
     /// Languages
     /// </summary>
-    protected readonly IList<L> _languages;
+    protected readonly IList<Language> _languages;
 
     /// <summary>
     /// Ctor
@@ -40,12 +39,12 @@ public partial class PropertyManager<T, L> where L : Language
     /// <param name="catalogSettings">Catalog settings</param>
     /// <param name="localizedProperties">Localized access properties</param>
     /// <param name="languages">Languages</param>
-    public PropertyManager(IEnumerable<PropertyByName<T, L>> defaultProperties, CatalogSettings catalogSettings, IEnumerable<PropertyByName<T, L>> localizedProperties = null, IList<L> languages = null)
+    public PropertyManager(IEnumerable<PropertyByName<T>> defaultProperties, CatalogSettings catalogSettings, IEnumerable<PropertyByName<T>> localizedProperties = null, IList<Language> languages = null)
     {
-        _defaultProperties = new Dictionary<string, PropertyByName<T, L>>();
+        _defaultProperties = new Dictionary<string, PropertyByName<T>>();
         _catalogSettings = catalogSettings;
-        _localizedProperties = new Dictionary<string, PropertyByName<T, L>>();
-        _languages = new List<L>();
+        _localizedProperties = new Dictionary<string, PropertyByName<T>>();
+        _languages = new List<Language>();
 
         if (languages != null)
             _languages = languages;
@@ -68,6 +67,32 @@ public partial class PropertyManager<T, L> where L : Language
                 _localizedProperties.Add(propertyByName.PropertyName, propertyByName);
             }
         }
+    }
+
+    /// <summary>
+    /// Sets the cell's value.
+    /// </summary>
+    /// <param name="cell">The cell to set value</param>
+    /// <param name="value">The cell value</param>
+    protected void SetCellValue(IXLCell cell, object value)
+    {
+        if (value == null)
+        {
+            cell.SetValue(Blank.Value);
+
+            return;
+        }
+
+        cell.Value = value switch
+        {
+            int intValue => intValue,
+            bool boolValue => boolValue,
+            DateTime dateTimeValue => dateTimeValue,
+            decimal decimalValue => decimalValue,
+            double doubleValue => doubleValue,
+            float floatValue => floatValue,
+            _ => value.ToString()
+        };
     }
 
     /// <summary>
@@ -96,7 +121,7 @@ public partial class PropertyManager<T, L> where L : Language
             //create Headers and format them 
             WriteDefaultCaption(worksheet);
 
-            var lwss = new Dictionary<L, IXLWorksheet>();
+            var lwss = new Dictionary<Language, IXLWorksheet>();
 
             if (_languages.Count >= 2)
             {
@@ -138,7 +163,7 @@ public partial class PropertyManager<T, L> where L : Language
     /// <summary>
     /// Current language to access
     /// </summary>
-    public L CurrentLanguage { get; set; }
+    public Language CurrentLanguage { get; set; }
 
     /// <summary>
     /// Return property index
@@ -218,7 +243,7 @@ public partial class PropertyManager<T, L> where L : Language
             else
             {
                 var value = await prop.GetProperty(CurrentObject, CurrentLanguage);
-                cell.SetValue((XLCellValue)value?.ToString());
+                SetCellValue(cell, value);
             }
             cell.Style.Alignment.WrapText = false;
         }
@@ -280,7 +305,7 @@ public partial class PropertyManager<T, L> where L : Language
             else
             {
                 var value = await prop.GetProperty(CurrentObject, CurrentLanguage);
-                cell.SetValue((XLCellValue)value?.ToString());
+                SetCellValue(cell, value);
             }
             cell.Style.Alignment.WrapText = false;
         }
@@ -375,7 +400,7 @@ public partial class PropertyManager<T, L> where L : Language
     /// </summary>
     /// <param name="propertyName"></param>
     /// <returns></returns>
-    public PropertyByName<T, L> GetDefaultProperty(string propertyName)
+    public PropertyByName<T> GetDefaultProperty(string propertyName)
     {
         return _defaultProperties.TryGetValue(propertyName, out var value) ? value : null;
     }
@@ -385,7 +410,7 @@ public partial class PropertyManager<T, L> where L : Language
     /// </summary>
     /// <param name="propertyName"></param>
     /// <returns></returns>
-    public PropertyByName<T, L> GetLocalizedProperty(string propertyName)
+    public PropertyByName<T> GetLocalizedProperty(string propertyName)
     {
         return _localizedProperties.TryGetValue(propertyName, out var value) ? value : null;
     }
@@ -393,12 +418,12 @@ public partial class PropertyManager<T, L> where L : Language
     /// <summary>
     /// Get default property array
     /// </summary>
-    public PropertyByName<T, L>[] GetDefaultProperties => _defaultProperties.Values.ToArray();
+    public PropertyByName<T>[] GetDefaultProperties => _defaultProperties.Values.ToArray();
 
     /// <summary>
     /// Get localized property array
     /// </summary>
-    public PropertyByName<T, L>[] GetLocalizedProperties => _localizedProperties.Values.ToArray();
+    public PropertyByName<T>[] GetLocalizedProperties => _localizedProperties.Values.ToArray();
 
     /// <summary>
     /// Set SelectList

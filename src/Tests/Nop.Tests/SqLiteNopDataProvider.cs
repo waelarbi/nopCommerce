@@ -6,7 +6,6 @@ using LinqToDB;
 using LinqToDB.Data;
 using LinqToDB.DataProvider;
 using LinqToDB.DataProvider.SQLite;
-using LinqToDB.Tools;
 using Microsoft.Data.Sqlite;
 using Nop.Core;
 using Nop.Core.ComponentModel;
@@ -165,8 +164,8 @@ public partial class SqLiteNopDataProvider : BaseDataProvider, INopDataProvider
     /// <typeparam name="TEntity">Entity type</typeparam>
     public override Task BulkInsertEntitiesAsync<TEntity>(IEnumerable<TEntity> entities)
     {
-        using (new ReaderWriteLockDisposable(_locker))
-            DataContext.BulkCopy(new BulkCopyOptions(), entities.RetrieveIdentity(DataContext));
+        foreach (var entity in entities)
+            InsertEntity(entity);
 
         return Task.CompletedTask;
     }

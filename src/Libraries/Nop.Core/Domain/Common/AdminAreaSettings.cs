@@ -13,6 +13,11 @@ public partial class AdminAreaSettings : ISettings
     public int DefaultGridPageSize { get; set; }
 
     /// <summary>
+    /// Products bulk edit grid page size
+    /// </summary>
+    public int ProductsBulkEditGridPageSize { get; set; }
+
+    /// <summary>
     /// Popup grid page size (for popup pages)
     /// </summary>
     public int PopupGridPageSize { get; set; }
@@ -71,4 +76,9 @@ public partial class AdminAreaSettings : ISettings
     /// Gets or sets a value indicating whether to documantation reference links on pages
     /// </summary>
     public bool ShowDocumentationReferenceLinks { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to the content header should be sticky when scrolling
+    /// </summary>
+    public bool UseStickyHeaderLayout { get; set; }
 }

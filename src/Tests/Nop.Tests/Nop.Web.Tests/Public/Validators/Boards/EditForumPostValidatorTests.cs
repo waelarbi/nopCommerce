@@ -1,5 +1,4 @@
 ﻿using FluentValidation.TestHelper;
-using MimeKit.Cryptography;
 using Nop.Services.Localization;
 using Nop.Web.Models.Boards;
 using Nop.Web.Validators.Boards;
@@ -15,7 +14,7 @@ public class EditForumPostValidatorTests : BaseNopTest
     [OneTimeSetUp]
     public void Setup()
     {
-        _validator = new EditForumPostValidator(GetService<ILocalizationService>()) ;
+        _validator = new EditForumPostValidator(GetService<ILocalizationService>());
     }
 
     [Test]

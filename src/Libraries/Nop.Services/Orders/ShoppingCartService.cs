@@ -44,6 +44,7 @@ public partial class ShoppingCartService : IShoppingCartService
     protected readonly IDateTimeHelper _dateTimeHelper;
     protected readonly IEventPublisher _eventPublisher;
     protected readonly IGenericAttributeService _genericAttributeService;
+    protected readonly IGiftCardService _giftCardService;
     protected readonly ILocalizationService _localizationService;
     protected readonly IPermissionService _permissionService;
     protected readonly IPriceCalculationService _priceCalculationService;
@@ -79,6 +80,7 @@ public partial class ShoppingCartService : IShoppingCartService
         IDateTimeHelper dateTimeHelper,
         IEventPublisher eventPublisher,
         IGenericAttributeService genericAttributeService,
+        IGiftCardService giftCardService,
         ILocalizationService localizationService,
         IPermissionService permissionService,
         IPriceCalculationService priceCalculationService,
@@ -110,6 +112,7 @@ public partial class ShoppingCartService : IShoppingCartService
         _dateTimeHelper = dateTimeHelper;
         _eventPublisher = eventPublisher;
         _genericAttributeService = genericAttributeService;
+        _giftCardService = giftCardService;
         _localizationService = localizationService;
         _permissionService = permissionService;
         _priceCalculationService = priceCalculationService;
@@ -199,9 +202,9 @@ public partial class ShoppingCartService : IShoppingCartService
     /// </summary>
     /// <param name="customer">Customer</param>
     /// <returns>Result</returns>
-    protected virtual bool IsCustomerShoppingCartEmpty(Customer customer)
+    protected virtual async Task<bool> IsCustomerShoppingCartEmptyAsync(Customer customer)
     {
-        return !_sciRepository.Table.Any(sci => sci.CustomerId == customer.Id);
+        return !await _sciRepository.Table.AnyAsync(sci => sci.CustomerId == customer.Id);
     }
 
     /// <summary>
@@ -531,6 +534,14 @@ public partial class ShoppingCartService : IShoppingCartService
             }
         }
 
+        if (product.AgeVerification && product.MinimumAgeToPurchase > 0)
+        { 
+            if (!customer.DateOfBirth.HasValue)
+                warnings.Add(await _localizationService.GetResourceAsync("ShoppingCart.DateOfBirthRequired"));
+            else if (CommonHelper.GetDifferenceInYears(customer.DateOfBirth.Value, DateTime.Today) < product.MinimumAgeToPurchase)
+                warnings.Add(string.Format(await _localizationService.GetResourceAsync("ShoppingCart.MinimumAgeToPurchase"), product.MinimumAgeToPurchase));
+        }
+
         if (!product.AvailableEndDateTimeUtc.HasValue || availableStartDateError)
             return warnings;
 
@@ -603,7 +614,7 @@ public partial class ShoppingCartService : IShoppingCartService
         await _sciRepository.DeleteAsync(shoppingCartItem);
 
         //reset "HasShoppingCartItems" property used for performance optimization
-        var hasShoppingCartItems = !IsCustomerShoppingCartEmpty(customer);
+        var hasShoppingCartItems = !await IsCustomerShoppingCartEmptyAsync(customer);
         if (hasShoppingCartItems != customer.HasShoppingCartItems)
         {
             customer.HasShoppingCartItems = hasShoppingCartItems;
@@ -668,7 +679,7 @@ public partial class ShoppingCartService : IShoppingCartService
         await _eventPublisher.PublishAsync(new ClearShoppingCartEvent(cart));
 
         //reset "HasShoppingCartItems" property used for performance optimization
-        var hasShoppingCartItems = !IsCustomerShoppingCartEmpty(customer);
+        var hasShoppingCartItems = !await IsCustomerShoppingCartEmptyAsync(customer);
         if (hasShoppingCartItems != customer.HasShoppingCartItems)
         {
             customer.HasShoppingCartItems = hasShoppingCartItems;
@@ -1021,6 +1032,11 @@ public partial class ShoppingCartService : IShoppingCartService
         //gift cards
         if (!product.IsGiftCard)
             return warnings;
+
+        var customer = await _workContext.GetCurrentCustomerAsync();
+        var giftCards = await _giftCardService.GetActiveGiftCardsAppliedByCustomerAsync(customer);
+        if (giftCards.Any())
+            warnings.Add(await _localizationService.GetResourceAsync("ShoppingCart.GiftCardCouponCode.DontWorkWithGiftCards"));
 
         _productAttributeParser.GetGiftCardAttribute(attributesXml, out var giftCardRecipientName, out var giftCardRecipientEmail, out var giftCardSenderName, out var giftCardSenderEmail, out var _);
 
@@ -1561,13 +1577,13 @@ public partial class ShoppingCartService : IShoppingCartService
         ArgumentNullException.ThrowIfNull(product);
 
         var warnings = new List<string>();
-        if (shoppingCartType == ShoppingCartType.ShoppingCart && !await _permissionService.AuthorizeAsync(StandardPermissionProvider.EnableShoppingCart, customer))
+        if (shoppingCartType == ShoppingCartType.ShoppingCart && !await _permissionService.AuthorizeAsync(StandardPermission.PublicStore.ENABLE_SHOPPING_CART, customer))
         {
             warnings.Add("Shopping cart is disabled");
             return warnings;
         }
 
-        if (shoppingCartType == ShoppingCartType.Wishlist && !await _permissionService.AuthorizeAsync(StandardPermissionProvider.EnableWishlist, customer))
+        if (shoppingCartType == ShoppingCartType.Wishlist && !await _permissionService.AuthorizeAsync(StandardPermission.PublicStore.ENABLE_WISHLIST, customer))
         {
             warnings.Add("Wishlist is disabled");
             return warnings;
@@ -1676,7 +1692,7 @@ public partial class ShoppingCartService : IShoppingCartService
             await _sciRepository.InsertAsync(shoppingCartItem);
 
             //updated "HasShoppingCartItems" property used for performance optimization
-            var hasShoppingCartItems = !IsCustomerShoppingCartEmpty(customer);
+            var hasShoppingCartItems = !await IsCustomerShoppingCartEmptyAsync(customer);
             if (hasShoppingCartItems != customer.HasShoppingCartItems)
             {
                 customer.HasShoppingCartItems = hasShoppingCartItems;

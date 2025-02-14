@@ -22,12 +22,12 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IInstallationLocalizationService, InstallationLocalizationService>();
 
         //common factories
-        services.AddScoped<IAclSupportedModelFactory, AclSupportedModelFactory>();
         services.AddScoped<IDiscountSupportedModelFactory, DiscountSupportedModelFactory>();
         services.AddScoped<ILocalizedModelFactory, LocalizedModelFactory>();
         services.AddScoped<IStoreMappingSupportedModelFactory, StoreMappingSupportedModelFactory>();
 
         //admin factories
+        services.AddScoped<IAclSupportedModelFactory, AclSupportedModelFactory>();
         services.AddScoped<IBaseAdminModelFactory, BaseAdminModelFactory>();
         services.AddScoped<IActivityLogModelFactory, ActivityLogModelFactory>();
         services.AddScoped<IAddressModelFactory, AddressModelFactory>();

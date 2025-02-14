@@ -1,8 +1,8 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Nop.Web.Framework.Mvc.Filters;
+using Nop.Services.Security;
 using Nop.Web.Framework;
 using Nop.Web.Framework.Controllers;
-using Nop.Services.Security;
+using Nop.Web.Framework.Mvc.Filters;
 
 namespace Nop.Plugin.Misc.NopMobileApp.Controllers;
 
@@ -28,11 +28,9 @@ public class NopMobileAppController : BasePluginController
 
     #region Methods
 
-    public virtual async Task<IActionResult> Configure()
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PLUGINS)]
+    public virtual IActionResult Configure()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManagePlugins))
-            return AccessDeniedView();
-
         return View("~/Plugins/Misc.NopMobileApp/Views/Configure.cshtml");
     }
 

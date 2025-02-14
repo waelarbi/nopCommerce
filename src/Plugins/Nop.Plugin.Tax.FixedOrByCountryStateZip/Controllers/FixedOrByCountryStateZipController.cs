@@ -1,11 +1,8 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
-using Nop.Core;
-using Nop.Core.Domain.Customers;
 using Nop.Plugin.Tax.FixedOrByCountryStateZip.Domain;
 using Nop.Plugin.Tax.FixedOrByCountryStateZip.Models;
 using Nop.Plugin.Tax.FixedOrByCountryStateZip.Services;
-using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Directory;
 using Nop.Services.Localization;
@@ -36,8 +33,6 @@ public class FixedOrByCountryStateZipController : BasePluginController
     protected readonly IStateProvinceService _stateProvinceService;
     protected readonly IStoreService _storeService;
     protected readonly ITaxCategoryService _taxCategoryService;
-    protected readonly IGenericAttributeService _genericAttributeService;
-    protected readonly IWorkContext _workContext;
 
     #endregion
 
@@ -51,9 +46,7 @@ public class FixedOrByCountryStateZipController : BasePluginController
         ISettingService settingService,
         IStateProvinceService stateProvinceService,
         IStoreService storeService,
-        ITaxCategoryService taxCategoryService,
-        IGenericAttributeService genericAttributeService,
-        IWorkContext workContext)
+        ITaxCategoryService taxCategoryService)
 
     {
         _countryStateZipSettings = countryStateZipSettings;
@@ -65,8 +58,6 @@ public class FixedOrByCountryStateZipController : BasePluginController
         _stateProvinceService = stateProvinceService;
         _storeService = storeService;
         _taxCategoryService = taxCategoryService;
-        _genericAttributeService = genericAttributeService;
-        _workContext = workContext;
 
     }
 
@@ -74,11 +65,9 @@ public class FixedOrByCountryStateZipController : BasePluginController
 
     #region Methods
 
-    public async Task<IActionResult> Configure(bool showtour = false)
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
+    public async Task<IActionResult> Configure()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return AccessDeniedView();
-
         var taxCategories = await _taxCategoryService.GetAllTaxCategoriesAsync();
 
         if (!taxCategories.Any())
@@ -118,26 +107,13 @@ public class FixedOrByCountryStateZipController : BasePluginController
                 model.AvailableStates.Add(new SelectListItem { Text = s.Name, Value = s.Id.ToString() });
         }
 
-        //show configuration tour
-        if (showtour)
-        {
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var hideCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.HideConfigurationStepsAttribute);
-            var closeCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.CloseConfigurationStepsAttribute);
-
-            if (!hideCard && !closeCard)
-                ViewBag.ShowTour = true;
-        }
-
         return View("~/Plugins/Tax.FixedOrByCountryStateZip/Views/Configure.cshtml", model);
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
     public async Task<IActionResult> SaveMode(bool value)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return Content("Access denied");
-
         //save settings
         _countryStateZipSettings.CountryStateZipEnabled = value;
         await _settingService.SaveSettingAsync(_countryStateZipSettings);
@@ -148,11 +124,9 @@ public class FixedOrByCountryStateZipController : BasePluginController
     #region Fixed tax
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
     public async Task<IActionResult> FixedRatesList(ConfigurationModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return await AccessDeniedJsonAsync();
-
         var categories = (await _taxCategoryService.GetAllTaxCategoriesAsync()).ToPagedList(searchModel);
 
         var gridModel = await new FixedTaxRateListModel().PrepareToGridAsync(searchModel, categories, () =>
@@ -171,11 +145,9 @@ public class FixedOrByCountryStateZipController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
     public async Task<IActionResult> FixedRateUpdate(FixedTaxRateModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return Content("Access denied");
-
         await _settingService.SetSettingAsync(string.Format(FixedOrByCountryStateZipDefaults.FIXED_RATE_SETTINGS_KEY, model.TaxCategoryId), model.Rate);
 
         return new NullJsonResult();
@@ -186,11 +158,9 @@ public class FixedOrByCountryStateZipController : BasePluginController
     #region Tax by country/state/zip
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
     public async Task<IActionResult> RatesByCountryStateZipList(ConfigurationModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return await AccessDeniedJsonAsync();
-
         var records = await _taxRateService.GetAllTaxRatesAsync(searchModel.Page - 1, searchModel.PageSize);
 
         var gridModel = await new CountryStateZipListModel().PrepareToGridAsync(searchModel, records, () =>
@@ -216,11 +186,9 @@ public class FixedOrByCountryStateZipController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
     public async Task<IActionResult> AddRateByCountryStateZip(ConfigurationModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return Content("Access denied");
-
         await _taxRateService.InsertTaxRateAsync(new TaxRate
         {
             StoreId = model.AddStoreId,
@@ -235,11 +203,9 @@ public class FixedOrByCountryStateZipController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
     public async Task<IActionResult> UpdateRateByCountryStateZip(CountryStateZipModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return Content("Access denied");
-
         var taxRate = await _taxRateService.GetTaxRateByIdAsync(model.Id);
         taxRate.Zip = model.Zip == "*" ? null : model.Zip;
         taxRate.Percentage = model.Percentage;
@@ -249,11 +215,9 @@ public class FixedOrByCountryStateZipController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_TAX_SETTINGS)]
     public async Task<IActionResult> DeleteRateByCountryStateZip(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageTaxSettings))
-            return Content("Access denied");
-
         var taxRate = await _taxRateService.GetTaxRateByIdAsync(id);
         if (taxRate != null)
             await _taxRateService.DeleteTaxRateAsync(taxRate);

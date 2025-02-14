@@ -86,11 +86,9 @@ public partial class CampaignController : BaseAdminController
         return RedirectToAction("List");
     }
 
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_VIEW)]
     public virtual async Task<IActionResult> List()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _campaignModelFactory.PrepareCampaignSearchModelAsync(new CampaignSearchModel());
 
@@ -98,22 +96,18 @@ public partial class CampaignController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_VIEW)]
     public virtual async Task<IActionResult> List(CampaignSearchModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return await AccessDeniedJsonAsync();
-
         //prepare model
         var model = await _campaignModelFactory.PrepareCampaignListModelAsync(searchModel);
 
         return Json(model);
     }
 
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_CREATE_EDIT)]
     public virtual async Task<IActionResult> Create()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         //prepare model
         var model = await _campaignModelFactory.PrepareCampaignModelAsync(new CampaignModel(), null);
 
@@ -121,11 +115,9 @@ public partial class CampaignController : BaseAdminController
     }
 
     [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_CREATE_EDIT)]
     public virtual async Task<IActionResult> Create(CampaignModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         if (ModelState.IsValid)
         {
             var campaign = model.ToEntity<Campaign>();
@@ -152,11 +144,9 @@ public partial class CampaignController : BaseAdminController
         return View(model);
     }
 
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_VIEW)]
     public virtual async Task<IActionResult> Edit(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         //try to get a campaign with the specified id
         var campaign = await _campaignService.GetCampaignByIdAsync(id);
         if (campaign == null)
@@ -171,11 +161,9 @@ public partial class CampaignController : BaseAdminController
     [HttpPost]
     [ParameterBasedOnFormName("save-continue", "continueEditing")]
     [FormValueRequired("save", "save-continue")]
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_CREATE_EDIT)]
     public virtual async Task<IActionResult> Edit(CampaignModel model, bool continueEditing)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         //try to get a campaign with the specified id
         var campaign = await _campaignService.GetCampaignByIdAsync(model.Id);
         if (campaign == null)
@@ -208,11 +196,9 @@ public partial class CampaignController : BaseAdminController
 
     [HttpPost, ActionName("Edit")]
     [FormValueRequired("send-test-email")]
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_SEND_EMAILS)]
     public virtual async Task<IActionResult> SendTestEmail(CampaignModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         //try to get a campaign with the specified id
         var campaign = await _campaignService.GetCampaignByIdAsync(model.Id);
         if (campaign == null)
@@ -265,11 +251,9 @@ public partial class CampaignController : BaseAdminController
 
     [HttpPost, ActionName("Edit")]
     [FormValueRequired("send-mass-email")]
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_SEND_EMAILS)]
     public virtual async Task<IActionResult> SendMassEmail(CampaignModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         //try to get a campaign with the specified id
         var campaign = await _campaignService.GetCampaignByIdAsync(model.Id);
         if (campaign == null)
@@ -306,11 +290,9 @@ public partial class CampaignController : BaseAdminController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_DELETE)]
     public virtual async Task<IActionResult> Delete(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageCampaigns))
-            return AccessDeniedView();
-
         //try to get a campaign with the specified id
         var campaign = await _campaignService.GetCampaignByIdAsync(id);
         if (campaign == null)
@@ -325,6 +307,34 @@ public partial class CampaignController : BaseAdminController
         _notificationService.SuccessNotification(await _localizationService.GetResourceAsync("Admin.Promotions.Campaigns.Deleted"));
 
         return RedirectToAction("List");
+    }
+
+    [HttpPost]
+    [CheckPermission(StandardPermission.Promotions.CAMPAIGNS_CREATE_EDIT)]
+    public virtual async Task<IActionResult> CopyCampaign(CampaignModel model)
+    {
+        var copyModel = model.CopyCampaignModel;
+        if (copyModel is null)
+            return RedirectToAction("List");
+
+        try
+        {
+            var originalCampaign = await _campaignService.GetCampaignByIdAsync(copyModel.OriginalCampaignId);
+
+            if (originalCampaign is null)
+                return RedirectToAction("List");
+
+            var newCampaign = await _campaignService.CopyCampaignAsync(originalCampaign, copyModel.Name);
+
+            _notificationService.SuccessNotification(await _localizationService.GetResourceAsync("Admin.Promotions.Campaigns.Copied"));
+
+            return RedirectToAction("Edit", new { id = newCampaign.Id });
+        }
+        catch (Exception exc)
+        {
+            _notificationService.ErrorNotification(exc.Message);
+            return RedirectToAction("Edit", new { id = copyModel.OriginalCampaignId });
+        }
     }
 
     #endregion

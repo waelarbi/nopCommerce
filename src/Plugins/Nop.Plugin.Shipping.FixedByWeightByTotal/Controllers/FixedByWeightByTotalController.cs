@@ -1,13 +1,10 @@
 ﻿using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
-using Nop.Core;
-using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Directory;
 using Nop.Plugin.Shipping.FixedByWeightByTotal.Domain;
 using Nop.Plugin.Shipping.FixedByWeightByTotal.Models;
 using Nop.Plugin.Shipping.FixedByWeightByTotal.Services;
-using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Directory;
 using Nop.Services.Localization;
@@ -41,8 +38,6 @@ public class FixedByWeightByTotalController : BasePluginController
     protected readonly IShippingService _shippingService;
     protected readonly IStateProvinceService _stateProvinceService;
     protected readonly IStoreService _storeService;
-    protected readonly IGenericAttributeService _genericAttributeService;
-    protected readonly IWorkContext _workContext;
     protected readonly MeasureSettings _measureSettings;
 
     #endregion
@@ -61,8 +56,6 @@ public class FixedByWeightByTotalController : BasePluginController
         IShippingService shippingService,
         IStateProvinceService stateProvinceService,
         IStoreService storeService,
-        IGenericAttributeService genericAttributeService,
-        IWorkContext workContext,
         MeasureSettings measureSettings)
     {
         _currencySettings = currencySettings;
@@ -77,8 +70,6 @@ public class FixedByWeightByTotalController : BasePluginController
         _stateProvinceService = stateProvinceService;
         _shippingService = shippingService;
         _storeService = storeService;
-        _genericAttributeService = genericAttributeService;
-        _workContext = workContext;
         _measureSettings = measureSettings;
     }
 
@@ -86,11 +77,9 @@ public class FixedByWeightByTotalController : BasePluginController
 
     #region Methods
 
-    public async Task<IActionResult> Configure(bool showtour = false)
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
+    public async Task<IActionResult> Configure()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return AccessDeniedView();
-
         var model = new ConfigurationModel
         {
             LimitMethodsToCreated = _fixedByWeightByTotalSettings.LimitMethodsToCreated,
@@ -106,6 +95,7 @@ public class FixedByWeightByTotalController : BasePluginController
         foreach (var warehouses in await _shippingService.GetAllWarehousesAsync())
             model.AvailableWarehouses.Add(new SelectListItem { Text = warehouses.Name, Value = warehouses.Id.ToString() });
         //shipping methods
+        model.AvailableShippingMethods.Add(new SelectListItem { Text = "*", Value = "0" });
         foreach (var sm in await _shippingService.GetAllShippingMethodsAsync())
             model.AvailableShippingMethods.Add(new SelectListItem { Text = sm.Name, Value = sm.Id.ToString() });
         //countries
@@ -118,26 +108,13 @@ public class FixedByWeightByTotalController : BasePluginController
 
         model.SetGridPageSize();
 
-        //show configuration tour
-        if (showtour)
-        {
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var hideCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.HideConfigurationStepsAttribute);
-            var closeCard = await _genericAttributeService.GetAttributeAsync<bool>(customer, NopCustomerDefaults.CloseConfigurationStepsAttribute);
-
-            if (!hideCard && !closeCard)
-                ViewBag.ShowTour = true;
-        }
-
         return View("~/Plugins/Shipping.FixedByWeightByTotal/Views/Configure.cshtml", model);
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> Configure(ConfigurationModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return Content("Access denied");
-
         //save settings
         _fixedByWeightByTotalSettings.LimitMethodsToCreated = model.LimitMethodsToCreated;
         await _settingService.SaveSettingAsync(_fixedByWeightByTotalSettings);
@@ -146,11 +123,9 @@ public class FixedByWeightByTotalController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> SaveMode(bool value)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return Content("Access denied");
-
         //save settings
         _fixedByWeightByTotalSettings.ShippingByWeightByTotalEnabled = value;
         await _settingService.SaveSettingAsync(_fixedByWeightByTotalSettings);
@@ -161,11 +136,9 @@ public class FixedByWeightByTotalController : BasePluginController
     #region Fixed rate
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> FixedShippingRateList(ConfigurationModel searchModel)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return await AccessDeniedJsonAsync();
-
         var shippingMethods = (await _shippingService.GetAllShippingMethodsAsync()).ToPagedList(searchModel);
 
         var gridModel = await new FixedRateListModel().PrepareToGridAsync(searchModel, shippingMethods, () =>
@@ -186,11 +159,9 @@ public class FixedByWeightByTotalController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> UpdateFixedShippingRate(FixedRateModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return Content("Access denied");
-
         await _settingService.SetSettingAsync(string.Format(FixedByWeightByTotalDefaults.FIXED_RATE_SETTINGS_KEY, model.ShippingMethodId), model.Rate, 0, false);
         await _settingService.SetSettingAsync(string.Format(FixedByWeightByTotalDefaults.TRANSIT_DAYS_SETTINGS_KEY, model.ShippingMethodId), model.TransitDays, 0, false);
 
@@ -204,11 +175,9 @@ public class FixedByWeightByTotalController : BasePluginController
     #region Rate by weight
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> RateByWeightByTotalList(ConfigurationModel searchModel, ConfigurationModel filter)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return await AccessDeniedJsonAsync();
-
         //var records = _shippingByWeightService.GetAll(command.Page - 1, command.PageSize);
         var records = await _shippingByWeightService.FindRecordsAsync(
             pageIndex: searchModel.Page - 1,
@@ -294,11 +263,9 @@ public class FixedByWeightByTotalController : BasePluginController
         return Json(gridModel);
     }
 
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> AddRateByWeightByTotalPopup()
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return AccessDeniedView();
-
         var model = new ShippingByWeightByTotalModel
         {
             PrimaryStoreCurrencyCode = (await _currencyService.GetCurrencyByIdAsync(_currencySettings.PrimaryStoreCurrencyId))?.CurrencyCode,
@@ -334,11 +301,9 @@ public class FixedByWeightByTotalController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> AddRateByWeightByTotalPopup(ShippingByWeightByTotalModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return AccessDeniedView();
-
         await _shippingByWeightService.InsertShippingByWeightRecordAsync(new ShippingByWeightByTotalRecord
         {
             StoreId = model.StoreId,
@@ -363,11 +328,9 @@ public class FixedByWeightByTotalController : BasePluginController
         return View("~/Plugins/Shipping.FixedByWeightByTotal/Views/AddRateByWeightByTotalPopup.cshtml", model);
     }
 
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> EditRateByWeightByTotalPopup(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return AccessDeniedView();
-
         var sbw = await _shippingByWeightService.GetByIdAsync(id);
         if (sbw == null)
             //no record found with the specified id
@@ -430,11 +393,9 @@ public class FixedByWeightByTotalController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> EditRateByWeightByTotalPopup(ShippingByWeightByTotalModel model)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return AccessDeniedView();
-
         var sbw = await _shippingByWeightService.GetByIdAsync(model.Id);
         if (sbw == null)
             //no record found with the specified id
@@ -464,11 +425,9 @@ public class FixedByWeightByTotalController : BasePluginController
     }
 
     [HttpPost]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_SHIPPING_SETTINGS)]
     public async Task<IActionResult> DeleteRateByWeightByTotal(int id)
     {
-        if (!await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
-            return Content("Access denied");
-
         var sbw = await _shippingByWeightService.GetByIdAsync(id);
         if (sbw != null)
             await _shippingByWeightService.DeleteShippingByWeightRecordAsync(sbw);

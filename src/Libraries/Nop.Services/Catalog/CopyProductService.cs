@@ -776,7 +776,9 @@ public partial class CopyProductService : ICopyProductService
             Published = isPublished,
             Deleted = product.Deleted,
             CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
+            UpdatedOnUtc = DateTime.UtcNow,
+            AgeVerification = product.AgeVerification,
+            MinimumAgeToPurchase = product.MinimumAgeToPurchase
         };
 
         //validate search engine name
@@ -854,7 +856,8 @@ public partial class CopyProductService : ICopyProductService
             await _storeMappingService.InsertStoreMappingAsync(productCopy, id);
 
         //customer role mapping
-        var customerRoleIds = await _aclService.GetCustomerRoleIdsWithAccessAsync(product);
+        var customerRoleIds = await _aclService.GetCustomerRoleIdsWithAccessAsync(product.Id, nameof(Product));
+
         foreach (var id in customerRoleIds)
             await _aclService.InsertAclRecordAsync(productCopy, id);
 
